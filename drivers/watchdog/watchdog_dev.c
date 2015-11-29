@@ -49,6 +49,7 @@
 #include <linux/uaccess.h>	/* For copy_to_user/put_user/... */
 
 #include "watchdog_core.h"
+#include "watchdog_pretimeout.h"
 
 /*
  * struct watchdog_core_data - watchdog core internal data
@@ -912,6 +913,12 @@ int watchdog_dev_register(struct watchdog_device *wdd)
 		return PTR_ERR(dev);
 	}
 
+	ret = watchdog_register_pretimeout(wdd, dev);
+	if (ret) {
+		device_destroy(&watchdog_class, devno);
+		watchdog_cdev_unregister(wdd);
+	}
+
 	return ret;
 }
 
@@ -925,6 +932,7 @@ int watchdog_dev_register(struct watchdog_device *wdd)
 
 void watchdog_dev_unregister(struct watchdog_device *wdd)
 {
+	watchdog_unregister_pretimeout(wdd);
 	device_destroy(&watchdog_class, wdd->wd_data->cdev.dev);
 	watchdog_cdev_unregister(wdd);
 }
