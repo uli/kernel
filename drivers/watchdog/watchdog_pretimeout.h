@@ -19,7 +19,11 @@ void watchdog_unregister_governor(struct watchdog_governor *gov);
 /* Interfaces to watchdog_core.c */
 #ifdef CONFIG_WATCHDOG_PRETIMEOUT_GOV
 
-#define WATCHDOG_PRETIMEOUT_DEFAULT_GOV	"none"
+#if IS_ENABLED(CONFIG_WATCHDOG_PRETIMEOUT_DEFAULT_GOV_PANIC)
+#define WATCHDOG_PRETIMEOUT_DEFAULT_GOV	"panic"
+#else
+#error "Default watchdog pretimeout governor is not set."
+#endif
 
 int watchdog_register_pretimeout(struct watchdog_device *wdd, struct device *dev);
 void watchdog_unregister_pretimeout(struct watchdog_device *wdd);
