@@ -23,6 +23,8 @@ void watchdog_unregister_governor(struct watchdog_governor *gov);
 #define WATCHDOG_PRETIMEOUT_DEFAULT_GOV	"panic"
 #elif IS_ENABLED(CONFIG_WATCHDOG_PRETIMEOUT_DEFAULT_GOV_NOOP)
 #define WATCHDOG_PRETIMEOUT_DEFAULT_GOV	"noop"
+#elif IS_ENABLED(CONFIG_WATCHDOG_PRETIMEOUT_DEFAULT_GOV_USERSPACE)
+#define WATCHDOG_PRETIMEOUT_DEFAULT_GOV	"userspace"
 #else
 #error "Default watchdog pretimeout governor is not set."
 #endif

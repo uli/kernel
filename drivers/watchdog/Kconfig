@@ -1800,6 +1800,15 @@ config WATCHDOG_PRETIMEOUT_DEFAULT_GOV_NOOP
 	  governor is selected by a user, write a short message to
 	  the kernel log buffer and don't do any system changes.
 
+config WATCHDOG_PRETIMEOUT_DEFAULT_GOV_USERSPACE
+	bool "userspace"
+	select WATCHDOG_PRETIMEOUT_GOV_USERSPACE
+	help
+	  Use userspace watchdog pretimeout governor by default,
+	  the governor sends a device state change uevent
+	  notification, if a pretimeout event a reported by a
+	  watchdog.
+
 endchoice
 
 config WATCHDOG_PRETIMEOUT_GOV_PANIC
@@ -1815,6 +1824,13 @@ config WATCHDOG_PRETIMEOUT_GOV_NOOP
 	  Select this option to enable noop watchdog pretimeout
 	  governor, only an informational message is added to the
 	  kernel log buffer, if watchdog pretimeout is happened.
+
+config WATCHDOG_PRETIMEOUT_GOV_USERSPACE
+	tristate "Userspace notifier watchdog pretimeout governor"
+	help
+	  Userspace notifier watchdog pretimeout governor, on watchdog
+	  pretimeout event send a notification to userspace for
+	  further handling.
 
 endif # WATCHDOG_PRETIMEOUT_GOV
 
