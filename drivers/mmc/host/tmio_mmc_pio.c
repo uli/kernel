@@ -36,6 +36,7 @@
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/mfd/tmio.h>
+#include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/slot-gpio.h>
@@ -363,7 +364,8 @@ static int tmio_mmc_start_command(struct tmio_mmc_host *host, struct mmc_command
 			 * multiple block transfer
 			 */
 			if ((host->pdata->flags & TMIO_MMC_HAVE_CMD12_CTRL) &&
-			    (cmd->opcode == SD_IO_RW_EXTENDED))
+			    ((cmd->opcode == SD_IO_RW_EXTENDED) ||
+			     host->mrq->sbc))
 				c |= NO_CMD12_ISSUE;
 		}
 		if (data->flags & MMC_DATA_READ)
@@ -756,6 +758,74 @@ static int tmio_mmc_start_data(struct tmio_mmc_host *host,
 	return 0;
 }
 
+static void tmio_mmc_hw_reset(struct mmc_host *mmc)
+{
+	struct tmio_mmc_host *host = mmc_priv(mmc);
+
+	if (host->hw_reset)
+		host->hw_reset(host);
+
+	mmc_retune_timer_stop(host->mmc);
+	mmc_retune_needed(host->mmc);
+}
+
+static int tmio_mmc_execute_tuning(struct mmc_host *mmc, u32 opcode)
+{
+	struct tmio_mmc_host *host = mmc_priv(mmc);
+	unsigned int num = 0;
+	int i, ret = 0;
+	bool *tap;
+
+	if (host->init_tuning)
+		num = host->init_tuning(host);
+	if (!num) {
+		/* Tuning is not supported */
+		ret = 0;
+		goto out;
+	}
+
+	tap = kmalloc(num * 2, GFP_KERNEL);
+	if (!tap) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	/*
+	 * Issue CMD19 twice for each tap
+	 */
+	for (i = 0; i < 2 * num; i++) {
+		int err;
+
+		if (host->prepare_tuning)
+			host->prepare_tuning(host, i);
+
+		err = mmc_send_tuning(host->mmc, opcode, NULL);
+		if (err && err != -EILSEQ) {
+			ret = err;
+			goto err_free;
+		}
+		tap[i] = (err == 0);
+
+		mdelay(1);
+	}
+
+	if (host->select_tuning)
+		ret = host->select_tuning(host, tap, num * 2);
+
+err_free:
+	kfree(tap);
+out:
+	if (ret < 0) {
+		dev_warn(&host->pdev->dev, "Tuning procedure failed\n");
+		tmio_mmc_hw_reset(mmc);
+	} else {
+		host->mmc->retune_period = 0;
+	}
+
+	return ret;
+
+}
+
 /* Process requests from the MMC layer */
 static void tmio_mmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 {
@@ -780,6 +850,14 @@ static void tmio_mmc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	host->mrq = mrq;
 
 	spin_unlock_irqrestore(&host->lock, flags);
+
+	if (mrq->sbc) {
+		ret = tmio_mmc_start_command(host, mrq->sbc);
+		if (ret)
+			goto fail;
+		host->last_req_ts = jiffies;
+		host->mrq = mrq;
+	}
 
 	if (mrq->data) {
 		ret = tmio_mmc_start_data(host, mrq->data);
@@ -978,6 +1056,8 @@ static struct mmc_host_ops tmio_mmc_ops = {
 	.enable_sdio_irq = tmio_mmc_enable_sdio_irq,
 	.card_busy	= tmio_mmc_card_busy,
 	.multi_io_quirk	= tmio_multi_io_quirk,
+	.execute_tuning = tmio_mmc_execute_tuning,
+	.hw_reset	= tmio_mmc_hw_reset,
 };
 
 static int tmio_mmc_init_ocr(struct tmio_mmc_host *host)
@@ -1201,6 +1281,9 @@ int tmio_mmc_host_runtime_suspend(struct device *dev)
 {
 	struct mmc_host *mmc = dev_get_drvdata(dev);
 	struct tmio_mmc_host *host = mmc_priv(mmc);
+
+	mmc_retune_timer_stop(host->mmc);
+	mmc_retune_needed(host->mmc);
 
 	tmio_mmc_disable_mmc_irqs(host, TMIO_MASK_ALL);
 
