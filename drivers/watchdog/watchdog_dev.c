@@ -63,6 +63,7 @@ struct watchdog_core_data {
 	struct kref kref;
 	struct cdev cdev;
 	struct watchdog_device *wdd;
+	struct device *dev;
 	struct mutex lock;
 	unsigned long last_keepalive;
 	unsigned long last_hw_keepalive;
@@ -70,6 +71,7 @@ struct watchdog_core_data {
 	unsigned long status;		/* Internal status bits */
 #define _WDOG_DEV_OPEN		0	/* Opened ? */
 #define _WDOG_ALLOW_RELEASE	1	/* Did we receive the magic char ? */
+	struct work_struct uevent_work;
 };
 
 /* the dev_t structure to store the dynamically allocated watchdog devices */
@@ -821,6 +823,21 @@ static struct miscdevice watchdog_miscdev = {
 	.fops		= &watchdog_fops,
 };
 
+void watchdog_dev_uevent(struct watchdog_device *wdd)
+{
+	queue_work(watchdog_wq, &wdd->wd_data->uevent_work);
+}
+
+static void watchdog_dev_uevent_work(struct work_struct *work)
+{
+	struct watchdog_core_data *wd_data = container_of(work, struct watchdog_core_data,
+							  uevent_work);
+
+	mutex_lock(&wd_data->lock);
+	kobject_uevent(&wd_data->dev->kobj, KOBJ_CHANGE);
+	mutex_unlock(&wd_data->lock);
+}
+
 /*
  *	watchdog_cdev_register: register watchdog character device
  *	@wdd: watchdog device
@@ -849,6 +866,7 @@ static int watchdog_cdev_register(struct watchdog_device *wdd, dev_t devno)
 		return -ENODEV;
 
 	INIT_DELAYED_WORK(&wd_data->work, watchdog_ping_work);
+	INIT_WORK(&wd_data->uevent_work, watchdog_dev_uevent_work);
 
 	if (wdd->id == 0) {
 		old_wd_data = wd_data;
@@ -967,6 +985,8 @@ int watchdog_dev_register(struct watchdog_device *wdd)
 		device_destroy(&watchdog_class, devno);
 		watchdog_cdev_unregister(wdd);
 	}
+
+	wdd->wd_data->dev = dev;
 
 	return ret;
 }
