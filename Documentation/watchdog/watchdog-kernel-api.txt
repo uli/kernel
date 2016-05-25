@@ -179,8 +179,8 @@ they are supported. These optional routines/operations are:
   (Note: the WDIOF_SETTIMEOUT needs to be set in the options field of the
   watchdog's info structure).
   If the watchdog driver does not have to perform any action but setting the
-  watchdog_device.timeout, this callback can be omitted.
-  If set_timeout is not provided but, WDIOF_SETTIMEOUT is set, the watchdog
+  watchdog_device.timeout, this callback can be omitted. That means if
+  set_timeout is not provided but WDIOF_SETTIMEOUT is set, the watchdog
   infrastructure updates the timeout value of the watchdog_device internally
   to the requested value.
 * get_timeleft: this routines returns the time that's left before a reset.
