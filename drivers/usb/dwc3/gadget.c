@@ -867,7 +867,8 @@ static u32 dwc3_calc_trbs_left(struct dwc3_ep *dep)
 }
 
 static void dwc3_prepare_one_trb_sg(struct dwc3_ep *dep,
-		struct dwc3_request *req, unsigned int trbs_left)
+		struct dwc3_request *req, unsigned int trbs_left,
+		unsigned int more_coming)
 {
 	struct usb_request *request = &req->request;
 	struct scatterlist *sg = request->sg;
@@ -884,7 +885,8 @@ static void dwc3_prepare_one_trb_sg(struct dwc3_ep *dep,
 		dma = sg_dma_address(s);
 
 		if (sg_is_last(s)) {
-			if (list_is_last(&req->list, &dep->pending_list))
+			if (usb_endpoint_xfer_int(dep->endpoint.desc) ||
+				!more_coming)
 				last = true;
 
 			chain = false;
@@ -905,7 +907,8 @@ static void dwc3_prepare_one_trb_sg(struct dwc3_ep *dep,
 }
 
 static void dwc3_prepare_one_trb_linear(struct dwc3_ep *dep,
-		struct dwc3_request *req, unsigned int trbs_left)
+		struct dwc3_request *req, unsigned int trbs_left,
+		unsigned int more_coming)
 {
 	unsigned int	last = false;
 	unsigned int	length;
@@ -918,7 +921,7 @@ static void dwc3_prepare_one_trb_linear(struct dwc3_ep *dep,
 		last = true;
 
 	/* Is this the last request? */
-	if (list_is_last(&req->list, &dep->pending_list))
+	if (usb_endpoint_xfer_int(dep->endpoint.desc) || !more_coming)
 		last = true;
 
 	dwc3_prepare_one_trb(dep, req, dma, length,
@@ -936,6 +939,7 @@ static void dwc3_prepare_one_trb_linear(struct dwc3_ep *dep,
 static void dwc3_prepare_trbs(struct dwc3_ep *dep)
 {
 	struct dwc3_request	*req, *n;
+	unsigned int		more_coming;
 	u32			trbs_left;
 
 	BUILD_BUG_ON_NOT_POWER_OF_2(DWC3_TRB_NUM);
@@ -944,11 +948,15 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep)
 	if (!trbs_left)
 		return;
 
+	more_coming = dep->queued_requests - dep->allocated_requests;
+
 	list_for_each_entry_safe(req, n, &dep->pending_list, list) {
 		if (req->request.num_mapped_sgs > 0)
-			dwc3_prepare_one_trb_sg(dep, req, trbs_left--);
+			dwc3_prepare_one_trb_sg(dep, req, trbs_left--,
+					more_coming);
 		else
-			dwc3_prepare_one_trb_linear(dep, req, trbs_left--);
+			dwc3_prepare_one_trb_linear(dep, req, trbs_left--,
+					more_coming);
 
 		if (!trbs_left)
 			return;
