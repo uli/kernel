@@ -579,7 +579,7 @@ static void dwc3_remove_requests(struct dwc3 *dwc, struct dwc3_ep *dep)
 {
 	struct dwc3_request		*req;
 
-	if (!list_empty(&dep->started_list)) {
+	if (dep->queued_requests) {
 		dwc3_stop_active_transfer(dwc, dep->number, true);
 
 		/* - giveback all requests to gadget driver */
@@ -1280,7 +1280,7 @@ int __dwc3_gadget_ep_set_halt(struct dwc3_ep *dep, int value, int protocol)
 	memset(&params, 0x00, sizeof(params));
 
 	if (value) {
-		if (!protocol && ((dep->direction && dep->flags & DWC3_EP_BUSY) ||
+		if (!protocol && ((dep->direction && dep->queued_requests) ||
 				(!list_empty(&dep->started_list) ||
 				 !list_empty(&dep->pending_list)))) {
 			dwc3_trace(trace_dwc3_gadget,
