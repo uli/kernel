@@ -270,6 +270,29 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 	};
+
+#if 0
+	spi_gpio: spi-gpio {
+		pinctrl-0 = <&msiof1_pins>;
+		pinctrl-names = "default";
+		compatible = "spi-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		gpio-sck = <&gpio4 8 GPIO_ACTIVE_HIGH>;
+		gpio-mosi = <&gpio4 12 GPIO_ACTIVE_HIGH>;
+		gpio-miso = <&gpio4 13 GPIO_ACTIVE_HIGH>;
+		num-chipselects = <1>;
+		cs-gpios = <&gpio3 21 GPIO_ACTIVE_LOW>;
+		status = "okay";
+
+		spi@0 {
+			compatible = "mmc-spi-slot";
+			reg = <0>;
+			voltage-ranges = <3200 3400>;
+			spi-max-frequency = <25000000>;
+		};
+	};
+#endif
 };
 
 &du {
@@ -535,18 +558,75 @@
 	status = "okay";
 };
 
+#if 1
 &msiof1 {
 	pinctrl-0 = <&msiof1_pins>;
 	pinctrl-names = "default";
 
 	status = "okay";
 
+	num-chipselects = <1>;
+	cs-gpios = <&gpio3 21 GPIO_ACTIVE_LOW>;	/* SD2_DAT3 */
+
+	spi@0 {
+		compatible = "mmc-spi-slot";
+		reg = <0>;
+		voltage-ranges = <3200 3400>;
+		spi-max-frequency = <25000000>;
+	};
+
+#if 0
 	pmic: pmic@0 {
 		compatible = "renesas,r2a11302ft";
 		reg = <0>;
 		spi-max-frequency = <6000000>;
 		spi-cpol;
 		spi-cpha;
+	};
+#endif
+};
+#endif
+
+
+/* disable patched lines on SDHI side */
+&gpio3 {
+	sd2_clk {
+		gpio-hog;
+		gpios = <16 0>;	/* SD2_CLK */
+		input;
+	};
+	sd2_cmd {
+		gpio-hog;
+		gpios = <17 0>;	/* SD2_CMD */
+		input;
+	};
+	sd2_dat0 {
+		gpio-hog;
+		gpios = <18 0>;	/* SD2_DAT0 */
+		input;
+	};
+};
+
+/* force PMIC CS off */
+&gpio4 {
+	pmic_cs {
+		gpio-hog;
+		gpios = <9 0>;
+		output-high;
+	};
+};
+
+/* force SD2 power on, 3.3V */
+&gpio5 {
+	sd_pwr {
+		gpio-hog;
+		gpios = <25 0>;
+		output-high;
+	};
+	sd_vccq {
+		gpio-hog;
+		gpios = <30 0>;
+		output-high;
 	};
 };
 
@@ -563,6 +643,7 @@
 	status = "okay";
 };
 
+#if 0
 &sdhi2 {
 	pinctrl-0 = <&sdhi2_pins>;
 	pinctrl-1 = <&sdhi2_pins_uhs>;
@@ -574,6 +655,7 @@
 	sd-uhs-sdr50;
 	status = "okay";
 };
+#endif
 
 &cpu0 {
 	cpu0-supply = <&vdd_dvfs>;
