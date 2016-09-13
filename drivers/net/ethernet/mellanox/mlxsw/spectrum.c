@@ -56,6 +56,7 @@
 #include <generated/utsrelease.h>
 #include <net/pkt_cls.h>
 #include <net/tc_act/tc_mirred.h>
+#include <net/netevent.h>
 
 #include "spectrum.h"
 #include "core.h"
@@ -555,8 +556,9 @@ int mlxsw_sp_port_vid_to_fid_set(struct mlxsw_sp_port *mlxsw_sp_port,
 	return mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(svfa), svfa_pl);
 }
 
-static int mlxsw_sp_port_vid_learning_set(struct mlxsw_sp_port *mlxsw_sp_port,
-					  u16 vid, bool learn_enable)
+int __mlxsw_sp_port_vid_learning_set(struct mlxsw_sp_port *mlxsw_sp_port,
+				     u16 vid_begin, u16 vid_end,
+				     bool learn_enable)
 {
 	struct mlxsw_sp *mlxsw_sp = mlxsw_sp_port->mlxsw_sp;
 	char *spvmlr_pl;
@@ -565,11 +567,18 @@ static int mlxsw_sp_port_vid_learning_set(struct mlxsw_sp_port *mlxsw_sp_port,
 	spvmlr_pl = kmalloc(MLXSW_REG_SPVMLR_LEN, GFP_KERNEL);
 	if (!spvmlr_pl)
 		return -ENOMEM;
-	mlxsw_reg_spvmlr_pack(spvmlr_pl, mlxsw_sp_port->local_port, vid, vid,
-			      learn_enable);
+	mlxsw_reg_spvmlr_pack(spvmlr_pl, mlxsw_sp_port->local_port, vid_begin,
+			      vid_end, learn_enable);
 	err = mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(spvmlr), spvmlr_pl);
 	kfree(spvmlr_pl);
 	return err;
+}
+
+static int mlxsw_sp_port_vid_learning_set(struct mlxsw_sp_port *mlxsw_sp_port,
+					  u16 vid, bool learn_enable)
+{
+	return __mlxsw_sp_port_vid_learning_set(mlxsw_sp_port, vid, vid,
+						learn_enable);
 }
 
 static int
@@ -973,10 +982,6 @@ static int mlxsw_sp_port_add_vid(struct net_device *dev,
 			goto err_port_vp_mode_trans;
 	}
 
-	err = mlxsw_sp_port_vid_learning_set(mlxsw_sp_vport, vid, false);
-	if (err)
-		goto err_port_vid_learning_set;
-
 	err = mlxsw_sp_port_vlan_set(mlxsw_sp_vport, vid, vid, true, untagged);
 	if (err)
 		goto err_port_add_vid;
@@ -984,8 +989,6 @@ static int mlxsw_sp_port_add_vid(struct net_device *dev,
 	return 0;
 
 err_port_add_vid:
-	mlxsw_sp_port_vid_learning_set(mlxsw_sp_vport, vid, true);
-err_port_vid_learning_set:
 	if (list_is_singular(&mlxsw_sp_port->vports_list))
 		mlxsw_sp_port_vlan_mode_trans(mlxsw_sp_port);
 err_port_vp_mode_trans:
@@ -1011,8 +1014,6 @@ static int mlxsw_sp_port_kill_vid(struct net_device *dev,
 		return 0;
 
 	mlxsw_sp_port_vlan_set(mlxsw_sp_vport, vid, vid, false, false);
-
-	mlxsw_sp_port_vid_learning_set(mlxsw_sp_vport, vid, true);
 
 	/* Drop FID reference. If this was the last reference the
 	 * resources will be freed.
@@ -2105,6 +2106,13 @@ static int mlxsw_sp_port_create(struct mlxsw_sp *mlxsw_sp, u8 local_port,
 	dev->netdev_ops = &mlxsw_sp_port_netdev_ops;
 	dev->ethtool_ops = &mlxsw_sp_port_ethtool_ops;
 
+	err = mlxsw_sp_port_swid_set(mlxsw_sp_port, 0);
+	if (err) {
+		dev_err(mlxsw_sp->bus_info->dev, "Port %d: Failed to set SWID\n",
+			mlxsw_sp_port->local_port);
+		goto err_port_swid_set;
+	}
+
 	err = mlxsw_sp_port_dev_addr_init(mlxsw_sp_port);
 	if (err) {
 		dev_err(mlxsw_sp->bus_info->dev, "Port %d: Unable to init port mac address\n",
@@ -2128,13 +2136,6 @@ static int mlxsw_sp_port_create(struct mlxsw_sp *mlxsw_sp, u8 local_port,
 		dev_err(mlxsw_sp->bus_info->dev, "Port %d: Failed to set system port mapping\n",
 			mlxsw_sp_port->local_port);
 		goto err_port_system_port_mapping_set;
-	}
-
-	err = mlxsw_sp_port_swid_set(mlxsw_sp_port, 0);
-	if (err) {
-		dev_err(mlxsw_sp->bus_info->dev, "Port %d: Failed to set SWID\n",
-			mlxsw_sp_port->local_port);
-		goto err_port_swid_set;
 	}
 
 	err = mlxsw_sp_port_speed_by_width_set(mlxsw_sp_port, width);
@@ -2218,10 +2219,10 @@ err_port_buffers_init:
 err_port_admin_status_set:
 err_port_mtu_set:
 err_port_speed_by_width_set:
-	mlxsw_sp_port_swid_set(mlxsw_sp_port, MLXSW_PORT_SWID_DISABLED_PORT);
-err_port_swid_set:
 err_port_system_port_mapping_set:
 err_dev_addr_init:
+	mlxsw_sp_port_swid_set(mlxsw_sp_port, MLXSW_PORT_SWID_DISABLED_PORT);
+err_port_swid_set:
 	free_percpu(mlxsw_sp_port->pcpu_stats);
 err_alloc_stats:
 	kfree(mlxsw_sp_port->untagged_vlans);
@@ -2570,123 +2571,47 @@ static void mlxsw_sp_rx_listener_func(struct sk_buff *skb, u8 local_port,
 	netif_receive_skb(skb);
 }
 
+static void mlxsw_sp_rx_listener_mark_func(struct sk_buff *skb, u8 local_port,
+					   void *priv)
+{
+	skb->offload_fwd_mark = 1;
+	return mlxsw_sp_rx_listener_func(skb, local_port, priv);
+}
+
+#define MLXSW_SP_RXL(_func, _trap_id, _action)			\
+	{							\
+		.func = _func,					\
+		.local_port = MLXSW_PORT_DONT_CARE,		\
+		.trap_id = MLXSW_TRAP_ID_##_trap_id,		\
+		.action = MLXSW_REG_HPKT_ACTION_##_action,	\
+	}
+
 static const struct mlxsw_rx_listener mlxsw_sp_rx_listener[] = {
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_FDB_MC,
-	},
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, FDB_MC, TRAP_TO_CPU),
 	/* Traps for specific L2 packet types, not trapped as FDB MC */
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_STP,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_LACP,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_EAPOL,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_LLDP,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_MMRP,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_MVRP,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_RPVST,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_DHCP,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_IGMP_QUERY,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_IGMP_V1_REPORT,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_IGMP_V2_REPORT,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_IGMP_V2_LEAVE,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_IGMP_V3_REPORT,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_ARPBC,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_ARPUC,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_MTUERROR,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_TTLERROR,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_LBERROR,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_OSPF,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_IP2ME,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_RTR_INGRESS0,
-	},
-	{
-		.func = mlxsw_sp_rx_listener_func,
-		.local_port = MLXSW_PORT_DONT_CARE,
-		.trap_id = MLXSW_TRAP_ID_HOST_MISS_IPV4,
-	},
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, STP, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, LACP, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, EAPOL, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, LLDP, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, MMRP, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, MVRP, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, RPVST, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_mark_func, DHCP, MIRROR_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_mark_func, IGMP_QUERY, MIRROR_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, IGMP_V1_REPORT, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, IGMP_V2_REPORT, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, IGMP_V2_LEAVE, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, IGMP_V3_REPORT, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_mark_func, ARPBC, MIRROR_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_mark_func, ARPUC, MIRROR_TO_CPU),
+	/* L3 traps */
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, MTUERROR, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, TTLERROR, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, LBERROR, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_mark_func, OSPF, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, IP2ME, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, RTR_INGRESS0, TRAP_TO_CPU),
+	MLXSW_SP_RXL(mlxsw_sp_rx_listener_func, HOST_MISS_IPV4, TRAP_TO_CPU),
 };
 
 static int mlxsw_sp_traps_init(struct mlxsw_sp *mlxsw_sp)
@@ -2713,7 +2638,7 @@ static int mlxsw_sp_traps_init(struct mlxsw_sp *mlxsw_sp)
 		if (err)
 			goto err_rx_listener_register;
 
-		mlxsw_reg_hpkt_pack(hpkt_pl, MLXSW_REG_HPKT_ACTION_TRAP_TO_CPU,
+		mlxsw_reg_hpkt_pack(hpkt_pl, mlxsw_sp_rx_listener[i].action,
 				    mlxsw_sp_rx_listener[i].trap_id);
 		err = mlxsw_reg_write(mlxsw_sp->core, MLXSW_REG(hpkt), hpkt_pl);
 		if (err)
@@ -4541,18 +4466,26 @@ static struct notifier_block mlxsw_sp_inetaddr_nb __read_mostly = {
 	.priority = 10,	/* Must be called before FIB notifier block */
 };
 
+static struct notifier_block mlxsw_sp_router_netevent_nb __read_mostly = {
+	.notifier_call = mlxsw_sp_router_netevent_event,
+};
+
 static int __init mlxsw_sp_module_init(void)
 {
 	int err;
 
 	register_netdevice_notifier(&mlxsw_sp_netdevice_nb);
 	register_inetaddr_notifier(&mlxsw_sp_inetaddr_nb);
+	register_netevent_notifier(&mlxsw_sp_router_netevent_nb);
+
 	err = mlxsw_core_driver_register(&mlxsw_sp_driver);
 	if (err)
 		goto err_core_driver_register;
 	return 0;
 
 err_core_driver_register:
+	unregister_netevent_notifier(&mlxsw_sp_router_netevent_nb);
+	unregister_inetaddr_notifier(&mlxsw_sp_inetaddr_nb);
 	unregister_netdevice_notifier(&mlxsw_sp_netdevice_nb);
 	return err;
 }
@@ -4560,6 +4493,7 @@ err_core_driver_register:
 static void __exit mlxsw_sp_module_exit(void)
 {
 	mlxsw_core_driver_unregister(&mlxsw_sp_driver);
+	unregister_netevent_notifier(&mlxsw_sp_router_netevent_nb);
 	unregister_inetaddr_notifier(&mlxsw_sp_inetaddr_nb);
 	unregister_netdevice_notifier(&mlxsw_sp_netdevice_nb);
 }
