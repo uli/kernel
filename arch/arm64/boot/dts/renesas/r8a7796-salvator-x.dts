@@ -17,6 +17,8 @@
 
 	aliases {
 		serial0 = &scif2;
+		serial2 = &scif3;
+		serial3 = &hscif3;
 	};
 
 	chosen {
@@ -39,6 +41,14 @@
 		groups = "scif2_data_a";
 		function = "scif2";
 	};
+	scif3_pins: scif3 { /* TX: 1_11, RX: 1_8 */
+		groups = "scif3_data_b";
+		function = "scif3";
+	};
+	hscif3_pins: hscif3 { /* TX: 2_8, RX: 2_7 */
+		groups = "hscif3_data_d";
+		function = "hscif3";
+	};
 	scif_clk_pins: scif_clk {
 		groups = "scif_clk_a";
 		function = "scif_clk";
@@ -52,6 +62,22 @@
 
 &extal_clk {
 	clock-frequency = <16666666>;
+};
+
+&scif3 {
+	pinctrl-0 = <&scif3_pins>;
+	pinctrl-names = "default";
+
+	status = "okay";
+};
+
+/* SCIF3 TX -> HSCIF3 RX, HSCIF3 TX -> SCIF3 RX */
+
+&hscif3 {
+	pinctrl-0 = <&hscif3_pins>;
+	pinctrl-names = "default";
+
+	status = "okay";
 };
 
 &scif2 {
