@@ -3077,9 +3077,12 @@ static int adv76xx_parse_dt(struct adv76xx_state *state)
 	if (!of_property_read_u32(endpoint, "default-input", &v))
 		state->pdata.default_input = v;
 	else
-		state->pdata.default_input = -1;
+		state->pdata.default_input = 0;
 
 	of_node_put(endpoint);
+
+	if (!of_property_read_u32(np, "default-input", &v))
+		state->pdata.default_input = v;
 
 	flags = bus_cfg.bus.parallel.flags;
 
