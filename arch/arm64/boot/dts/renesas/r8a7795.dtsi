@@ -1569,6 +1569,7 @@
 			reg = <0 0xfea27000 0 0x200>;
 			clocks = <&cpg CPG_MOD 603>;
 			power-domains = <&sysc R8A7795_PD_ALWAYS_ON>;
+			iommus = <&ipmmu_vi 8>;
 		};
 
 		vspd1: vsp@fea28000 {
@@ -1586,6 +1587,7 @@
 			reg = <0 0xfea2f000 0 0x200>;
 			clocks = <&cpg CPG_MOD 602>;
 			power-domains = <&sysc R8A7795_PD_ALWAYS_ON>;
+			iommus = <&ipmmu_vi 9>;
 		};
 
 		vspd2: vsp@fea30000 {
@@ -1603,6 +1605,7 @@
 			reg = <0 0xfea37000 0 0x200>;
 			clocks = <&cpg CPG_MOD 601>;
 			power-domains = <&sysc R8A7795_PD_ALWAYS_ON>;
+			iommus = <&ipmmu_vi 10>;
 		};
 
 		vspd3: vsp@fea38000 {
@@ -1620,6 +1623,7 @@
 			reg = <0 0xfea3f000 0 0x200>;
 			clocks = <&cpg CPG_MOD 600>;
 			power-domains = <&sysc R8A7795_PD_ALWAYS_ON>;
+			iommus = <&ipmmu_vi 11>;
 		};
 
 		fdp1@fe940000 {
