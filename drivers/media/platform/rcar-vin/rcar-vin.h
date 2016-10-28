@@ -43,6 +43,14 @@ enum model_id {
 	RCAR_GEN3,
 };
 
+enum rvin_csi_id {
+	RVIN_CSI20,
+	RVIN_CSI21,
+	RVIN_CSI40,
+	RVIN_CSI41,
+	RVIN_CSI_MAX,
+};
+
 /**
  * STOPPED  - No operation in progress
  * RUNNING  - Operation in progress have buffers
@@ -81,12 +89,33 @@ struct rvin_graph_entity {
 	unsigned int sink_pad;
 };
 
+/** struct rvin_group_route - Map a CSI-2 receiver and channel to a CHSEL
+ * @vin:		Which VIN the CSI-2 and VC describes
+ * @csi:		VIN internal number for CSI-2 device
+ * @chan:		Output channel of the CSI-2 receiver. Each R-Car CSI-2
+ *			receiver has four output channels facing the VIN
+ *			devices, each channel can carry one CSI-2 Virtual
+ *			Channel (VC) and there are no correlation between
+ *			output channel number and CSI-2 VC. It's up to the
+ *			CSI-2 receiver driver to configure which VC is
+ *			outputted on which channel, the VIN devices only
+ *			cares about output channels.
+ * @mask:		Bitmask of chsel values which accommodates route
+ */
+struct rvin_group_route {
+	unsigned int vin;
+	enum rvin_csi_id csi;
+	unsigned char chan;
+	unsigned int mask;
+};
+
 /**
  * struct rvin_info - Information about the particular VIN implementation
  * @model:		VIN model
  * @use_mc:		use media controller instead of controlling subdevice
  * @max_width:		max input width the VIN supports
  * @max_height:		max input height the VIN supports
+ * @routes:		routing table VIN <-> CSI-2 for the chsel values
  */
 struct rvin_info {
 	enum model_id model;
@@ -94,6 +123,7 @@ struct rvin_info {
 
 	unsigned int max_width;
 	unsigned int max_height;
+	const struct rvin_group_route *routes;
 };
 
 /**
