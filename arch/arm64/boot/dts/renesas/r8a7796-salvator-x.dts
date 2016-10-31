@@ -22,7 +22,7 @@
 	};
 
 	chosen {
-		bootargs = "ignore_loglevel";
+		bootargs = "ignore_loglevel rw root=/dev/nfs cma=64M ip=dhcp";
 		stdout-path = "serial0:115200n8";
 	};
 
