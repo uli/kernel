@@ -16,6 +16,7 @@
 #include <linux/mutex.h>
 #include <linux/v4l2-dv-timings.h>
 
+#include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-dv-timings.h>
 #include <media/v4l2-ioctl.h>
@@ -1094,6 +1095,243 @@ static const struct v4l2_subdev_ops adv7482_ops_cvbs= {
 };
 
 /* -----------------------------------------------------------------------------
+ * Controls
+ */
+
+/* Contrast Control */
+#define ADV7482_CP_CON_REG	0x3a	/* Contrast (unsigned) */
+#define ADV7482_CP_CON_MIN	0	/* Minimum contrast */
+#define ADV7482_CP_CON_DEF	128	/* Default */
+#define ADV7482_CP_CON_MAX	255	/* Maximum contrast */
+
+/* Saturation Control */
+#define ADV7482_CP_SAT_REG	0x3b	/* Saturation (unsigned) */
+#define ADV7482_CP_SAT_MIN	0	/* Minimum saturation */
+#define ADV7482_CP_SAT_DEF	128	/* Default */
+#define ADV7482_CP_SAT_MAX	255	/* Maximum saturation */
+
+/* Brightness Control */
+#define ADV7482_CP_BRI_REG	0x3c	/* Brightness (signed) */
+#define ADV7482_CP_BRI_MIN	-128	/* Luma is -512d */
+#define ADV7482_CP_BRI_DEF	0	/* Luma is 0 */
+#define ADV7482_CP_BRI_MAX	127	/* Luma is 508d */
+
+/* Hue Control */
+#define ADV7482_CP_HUE_REG	0x3d	/* Hue (unsigned) */
+#define ADV7482_CP_HUE_MIN	0	/* -90 degree */
+#define ADV7482_CP_HUE_DEF	0	/* -90 degree */
+#define ADV7482_CP_HUE_MAX	255	/* +90 degree */
+
+/* Video adjustment register */
+#define ADV7482_CP_VID_ADJ_REG		0x3e
+/* Video adjustment mask */
+#define ADV7482_CP_VID_ADJ_MASK		0x7F
+/* Enable color controls */
+#define ADV7482_CP_VID_ADJ_ENABLE	0x80
+
+static int adv7482_cp_s_ctrl(struct v4l2_ctrl *ctrl,
+			     struct adv7482_state *state)
+{
+	int ret;
+
+	/* Enable video adjustment first */
+	ret = cp_read(state, ADV7482_CP_VID_ADJ_REG);
+	if (ret < 0)
+		return ret;
+	ret |= ADV7482_CP_VID_ADJ_ENABLE;
+
+	ret = cp_write(state, ADV7482_CP_VID_ADJ_REG, ret);
+	if (ret < 0)
+		return ret;
+
+	switch (ctrl->id) {
+	case V4L2_CID_BRIGHTNESS:
+		if (ctrl->val < ADV7482_CP_BRI_MIN ||
+		    ctrl->val > ADV7482_CP_BRI_MAX)
+			return -ERANGE;
+
+		ret = cp_write(state, ADV7482_CP_BRI_REG, ctrl->val);
+		break;
+	case V4L2_CID_HUE:
+		if (ctrl->val < ADV7482_CP_HUE_MIN ||
+		    ctrl->val > ADV7482_CP_HUE_MAX)
+			return -ERANGE;
+
+		ret = cp_write(state, ADV7482_CP_HUE_REG, ctrl->val);
+		break;
+	case V4L2_CID_CONTRAST:
+		if (ctrl->val < ADV7482_CP_CON_MIN ||
+		    ctrl->val > ADV7482_CP_CON_MAX)
+			return -ERANGE;
+
+		ret = cp_write(state, ADV7482_CP_CON_REG, ctrl->val);
+		break;
+	case V4L2_CID_SATURATION:
+		if (ctrl->val < ADV7482_CP_SAT_MIN ||
+		    ctrl->val > ADV7482_CP_SAT_MAX)
+			return -ERANGE;
+
+		ret = cp_write(state, ADV7482_CP_SAT_REG, ctrl->val);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return ret;
+}
+
+/* Contrast */
+#define ADV7482_SDP_REG_CON		0x08	/*Unsigned */
+#define ADV7482_SDP_CON_MIN		0
+#define ADV7482_SDP_CON_DEF		128
+#define ADV7482_SDP_CON_MAX		255
+/* Brightness*/
+#define ADV7482_SDP_REG_BRI		0x0a	/*Signed */
+#define ADV7482_SDP_BRI_MIN		-128
+#define ADV7482_SDP_BRI_DEF		0
+#define ADV7482_SDP_BRI_MAX		127
+/* Hue */
+#define ADV7482_SDP_REG_HUE		0x0b	/*Signed, inverted */
+#define ADV7482_SDP_HUE_MIN		-127
+#define ADV7482_SDP_HUE_DEF		0
+#define ADV7482_SDP_HUE_MAX		128
+
+/* Saturation */
+#define ADV7482_SDP_REG_SD_SAT_CB	0xe3
+#define ADV7482_SDP_REG_SD_SAT_CR	0xe4
+#define ADV7482_SDP_SAT_MIN		0
+#define ADV7482_SDP_SAT_DEF		128
+#define ADV7482_SDP_SAT_MAX		255
+
+static int adv7482_sdp_s_ctrl(struct v4l2_ctrl *ctrl,
+			      struct adv7482_state *state)
+{
+	int ret;
+
+	ret = sdp_write(state, 0x0e, 0x00);
+	if (ret < 0)
+		return ret;
+
+	switch (ctrl->id) {
+	case V4L2_CID_BRIGHTNESS:
+		if (ctrl->val < ADV7482_SDP_BRI_MIN ||
+		    ctrl->val > ADV7482_SDP_BRI_MAX)
+			return -ERANGE;
+
+		ret = sdp_write(state, ADV7482_SDP_REG_BRI, ctrl->val);
+		break;
+	case V4L2_CID_HUE:
+		if (ctrl->val < ADV7482_SDP_HUE_MIN ||
+		    ctrl->val > ADV7482_SDP_HUE_MAX)
+			return -ERANGE;
+
+		/*Hue is inverted according to HSL chart */
+		ret = sdp_write(state, ADV7482_SDP_REG_HUE, -ctrl->val);
+		break;
+	case V4L2_CID_CONTRAST:
+		if (ctrl->val < ADV7482_SDP_CON_MIN ||
+		    ctrl->val > ADV7482_SDP_CON_MAX)
+			return -ERANGE;
+
+		ret = sdp_write(state, ADV7482_SDP_REG_CON, ctrl->val);
+		break;
+	case V4L2_CID_SATURATION:
+		if (ctrl->val < ADV7482_SDP_SAT_MIN ||
+		    ctrl->val > ADV7482_SDP_SAT_MAX)
+			return -ERANGE;
+		/*
+		 *This could be V4L2_CID_BLUE_BALANCE/V4L2_CID_RED_BALANCE
+		 *Let's not confuse the user, everybody understands saturation
+		 */
+		ret = sdp_write(state, ADV7482_SDP_REG_SD_SAT_CB, ctrl->val);
+		if (ret)
+			break;
+		ret = sdp_write(state, ADV7482_SDP_REG_SD_SAT_CR, ctrl->val);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return ret;
+}
+
+static int adv7482_s_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct adv7482_state *state =
+		container_of(ctrl->handler, struct adv7482_state, ctrl_hdl);
+	int ret;
+
+	ret = mutex_lock_interruptible(&state->mutex);
+	if (ret)
+		return ret;
+
+	if (hack_is_hdmi(state))
+		ret = adv7482_cp_s_ctrl(ctrl, state);
+	else
+		ret = adv7482_sdp_s_ctrl(ctrl, state);
+
+	mutex_unlock(&state->mutex);
+
+	return ret;
+}
+
+static const struct v4l2_ctrl_ops adv7482_ctrl_ops = {
+	.s_ctrl = adv7482_s_ctrl,
+};
+
+static int adv7482_cp_init_controls(struct adv7482_state *state)
+{
+	v4l2_ctrl_handler_init(&state->ctrl_hdl, 4);
+
+	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+			  V4L2_CID_BRIGHTNESS, ADV7482_CP_BRI_MIN,
+			  ADV7482_CP_BRI_MAX, 1, ADV7482_CP_BRI_DEF);
+	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+			  V4L2_CID_CONTRAST, ADV7482_CP_CON_MIN,
+			  ADV7482_CP_CON_MAX, 1, ADV7482_CP_CON_DEF);
+	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+			  V4L2_CID_SATURATION, ADV7482_CP_SAT_MIN,
+			  ADV7482_CP_SAT_MAX, 1, ADV7482_CP_SAT_DEF);
+	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+			  V4L2_CID_HUE, ADV7482_CP_HUE_MIN,
+			  ADV7482_CP_HUE_MAX, 1, ADV7482_CP_HUE_DEF);
+
+	state->sd.ctrl_handler = &state->ctrl_hdl;
+	if (state->ctrl_hdl.error) {
+		v4l2_ctrl_handler_free(&state->ctrl_hdl);
+		return state->ctrl_hdl.error;
+	}
+
+	return v4l2_ctrl_handler_setup(&state->ctrl_hdl);
+}
+
+static int adv7482_sdp_init_controls(struct adv7482_state *state)
+{
+	v4l2_ctrl_handler_init(&state->ctrl_hdl, 4);
+
+	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+			  V4L2_CID_BRIGHTNESS, ADV7482_SDP_BRI_MIN,
+			  ADV7482_SDP_BRI_MAX, 1, ADV7482_SDP_BRI_DEF);
+	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+			  V4L2_CID_CONTRAST, ADV7482_SDP_CON_MIN,
+			  ADV7482_SDP_CON_MAX, 1, ADV7482_SDP_CON_DEF);
+	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+			  V4L2_CID_SATURATION, ADV7482_SDP_SAT_MIN,
+			  ADV7482_SDP_SAT_MAX, 1, ADV7482_SDP_SAT_DEF);
+	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+			  V4L2_CID_HUE, ADV7482_SDP_HUE_MIN,
+			  ADV7482_SDP_HUE_MAX, 1, ADV7482_SDP_HUE_DEF);
+
+	state->sd.ctrl_handler = &state->ctrl_hdl;
+	if (state->ctrl_hdl.error) {
+		v4l2_ctrl_handler_free(&state->ctrl_hdl);
+		return state->ctrl_hdl.error;
+	}
+
+	return v4l2_ctrl_handler_setup(&state->ctrl_hdl);
+}
+
+/* -----------------------------------------------------------------------------
  * Media Operations
  */
 
@@ -1405,6 +1643,14 @@ static int adv7482_probe(struct i2c_client *client,
 
 	state->sd.entity.ops = &adv7482_media_ops;
 
+	/* FIXME: Hack to expose CVBS and HDMI controls on correct subdev */
+	if (hack_is_hdmi(state))
+		ret = adv7482_cp_init_controls(state);
+	else
+		ret = adv7482_sdp_init_controls(state);
+	if (ret)
+		return ret;
+
 	ret = v4l2_async_register_subdev(&state->sd);
 	if (ret)
 		return ret;
@@ -1420,6 +1666,8 @@ static int adv7482_remove(struct i2c_client *client)
 	v4l2_async_unregister_subdev(sd);
 
 	media_entity_cleanup(&sd->entity);
+
+	v4l2_ctrl_handler_free(&state->ctrl_hdl);
 
 	mutex_destroy(&state->mutex);
 
