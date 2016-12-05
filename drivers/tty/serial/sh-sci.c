@@ -377,6 +377,8 @@ static const struct plat_sci_reg sci_regmap[SCIx_NR_REGTYPES][SCIx_NR_REGS] = {
 		[SCPDR]		= sci_reg_invalid,
 		[SCDL]		= { 0x30, 16 },
 		[SCCKS]		= { 0x34, 16 },
+		[HSRTRGR]	= { 0x54, 16 },
+		[HSTTRGR]	= { 0x58, 16 },
 	},
 
 	/*
