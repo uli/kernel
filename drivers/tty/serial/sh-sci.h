@@ -156,6 +156,7 @@ enum {
 #define SCxSR_FER(port)		(((port)->type == PORT_SCI) ? SCI_FER    : SCIF_FER)
 #define SCxSR_PER(port)		(((port)->type == PORT_SCI) ? SCI_PER    : SCIF_PER)
 #define SCxSR_BRK(port)		(((port)->type == PORT_SCI) ? 0x00       : SCIF_BRK)
+#define SCxSR_DR(port)		(((port)->type == PORT_SCI) ? 0x00       : SCIF_DR)
 
 #define SCxSR_ERRORS(port)	(to_sci_port(port)->error_mask)
 

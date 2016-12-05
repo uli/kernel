@@ -677,7 +677,7 @@ static int sci_poll_get_char(struct uart_port *port)
 		break;
 	} while (1);
 
-	if (!(status & SCxSR_RDxF(port)))
+	if (!(status & (SCxSR_RDxF(port) | SCxSR_DR(port))))
 		return NO_POLL_CHAR;
 
 	c = serial_port_in(port, SCxRDR);
@@ -773,7 +773,8 @@ static int sci_rxfill(struct uart_port *port)
 	if (reg->size)
 		return serial_port_in(port, SCFDR) & ((port->fifosize << 1) - 1);
 
-	return (serial_port_in(port, SCxSR) & SCxSR_RDxF(port)) != 0;
+	return (serial_port_in(port, SCxSR) &
+		(SCxSR_RDxF(port) | SCxSR_DR(port))) != 0;
 }
 
 /*
@@ -864,7 +865,7 @@ static void sci_receive_chars(struct uart_port *port)
 	unsigned char flag;
 
 	status = serial_port_in(port, SCxSR);
-	if (!(status & SCxSR_RDxF(port)))
+	if (!(status & (SCxSR_RDxF(port) | SCxSR_DR(port))))
 		return;
 
 	while (1) {
@@ -1672,7 +1673,7 @@ static irqreturn_t sci_mpxed_interrupt(int irq, void *ptr)
 	 * Rx Interrupt: if we're using DMA, the DMA controller clears RDF /
 	 * DR flags
 	 */
-	if (((ssr_status & SCxSR_RDxF(port)) || s->chan_rx) &&
+	if (((ssr_status & (SCxSR_RDxF(port) | SCxSR_DR(port))) || s->chan_rx) &&
 	    (scr_status & SCSCR_RIE))
 		ret = sci_rx_interrupt(irq, ptr);
 
