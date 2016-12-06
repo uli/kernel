@@ -141,6 +141,7 @@ struct sci_port {
 	struct timer_list		rx_timer;
 	unsigned int			rx_timeout;
 #endif
+	int				rx_trigger;
 
 	bool autorts;
 };
@@ -2204,6 +2205,7 @@ static void sci_reset(struct uart_port *port)
 {
 	const struct plat_sci_reg *reg;
 	unsigned int status;
+	struct sci_port *s = to_sci_port(port);
 
 	do {
 		status = serial_port_in(port, SCxSR);
@@ -2223,6 +2225,9 @@ static void sci_reset(struct uart_port *port)
 		status &= ~(SCLSR_TO | SCLSR_ORER);
 		serial_port_out(port, SCLSR, status);
 	}
+
+	if (s->rx_trigger > 1)
+		scif_set_rtrg(port, s->rx_trigger);
 }
 
 static void sci_set_termios(struct uart_port *port, struct ktermios *termios,
@@ -2729,6 +2734,7 @@ static int sci_init_single(struct platform_device *dev,
 		sci_port->overrun_reg = SCLSR;
 		sci_port->overrun_mask = SCLSR_ORER;
 		sci_port->sampling_rate_mask = SCI_SR_RANGE(8, 32);
+		sci_port->rx_trigger = 64;
 		break;
 	case PORT_SCIFA:
 		port->fifosize = 64;
@@ -2747,12 +2753,14 @@ static int sci_init_single(struct platform_device *dev,
 			sci_port->overrun_mask = SCLSR_ORER;
 			sci_port->sampling_rate_mask = SCI_SR(32);
 		}
+		sci_port->rx_trigger = 8;
 		break;
 	default:
 		port->fifosize = 1;
 		sci_port->overrun_reg = SCxSR;
 		sci_port->overrun_mask = SCI_ORER;
 		sci_port->sampling_rate_mask = SCI_SR(32);
+		sci_port->rx_trigger = 1;
 		break;
 	}
 
