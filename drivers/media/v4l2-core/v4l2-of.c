@@ -32,12 +32,19 @@ static int v4l2_of_parse_csi_bus(const struct device_node *node,
 	prop = of_find_property(node, "data-lanes", NULL);
 	if (prop) {
 		const __be32 *lane = NULL;
-		unsigned int i;
+		unsigned int i, n;
 
 		for (i = 0; i < ARRAY_SIZE(bus->data_lanes); i++) {
 			lane = of_prop_next_u32(prop, lane, &v);
 			if (!lane)
 				break;
+			for (n = 0; n < i; n++) {
+				if (bus->data_lanes[n] == v) {
+					pr_warn("%s: duplicated lane %u in data-lanes\n",
+						node->full_name, v);
+					return -EINVAL;
+				}
+			}
 			bus->data_lanes[i] = v;
 		}
 		bus->num_data_lanes = i;
@@ -63,6 +70,15 @@ static int v4l2_of_parse_csi_bus(const struct device_node *node,
 	}
 
 	if (!of_property_read_u32(node, "clock-lanes", &v)) {
+		unsigned int n;
+
+		for (n = 0; n < bus->num_data_lanes; n++) {
+			if (bus->data_lanes[n] == v) {
+				pr_warn("%s: duplicated lane %u in clock-lanes\n",
+					node->full_name, v);
+				return -EINVAL;
+			}
+		}
 		bus->clock_lane = v;
 		have_clk_lane = true;
 	}
