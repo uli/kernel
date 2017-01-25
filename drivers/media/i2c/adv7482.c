@@ -1275,13 +1275,54 @@ static int adv7482_s_ctrl(struct v4l2_ctrl *ctrl)
 	return ret;
 }
 
+static int adv7482_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct adv7482_state *state =
+		container_of(ctrl->handler, struct adv7482_state, ctrl_hdl);
+	unsigned int width, height, fps;
+	v4l2_std_id std;
+
+	switch (ctrl->id) {
+	case V4L2_CID_PIXEL_RATE:
+		if (hack_is_hdmi(state)) {
+			struct v4l2_dv_timings timings;
+			struct v4l2_bt_timings *bt = &timings.bt;
+
+			adv7482_query_dv_timings(&state->sd, &timings);
+
+			width = bt->width;
+			height = bt->height;
+			fps = DIV_ROUND_CLOSEST(bt->pixelclock,
+						V4L2_DV_BT_FRAME_WIDTH(bt) * V4L2_DV_BT_FRAME_HEIGHT(bt));
+		} else {
+			width = 720;
+			if (state->sdp.curr_norm == V4L2_STD_ALL)
+				adv7482_sdp_status(state, NULL,  &std);
+			else
+				std = state->sdp.curr_norm;
+
+			height = std & V4L2_STD_525_60 ? 480 : 576;
+			fps = std & V4L2_STD_525_60 ? 30 : 25;
+		}
+		*ctrl->p_new.p_s64 = width * height * fps;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static const struct v4l2_ctrl_ops adv7482_ctrl_ops = {
 	.s_ctrl = adv7482_s_ctrl,
+	.g_volatile_ctrl = adv7482_g_volatile_ctrl,
 };
 
 static int adv7482_cp_init_controls(struct adv7482_state *state)
 {
-	v4l2_ctrl_handler_init(&state->ctrl_hdl, 4);
+	struct v4l2_ctrl *ctrl;
+
+	v4l2_ctrl_handler_init(&state->ctrl_hdl, 5);
 
 	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
 			  V4L2_CID_BRIGHTNESS, ADV7482_CP_BRI_MIN,
@@ -1295,6 +1336,10 @@ static int adv7482_cp_init_controls(struct adv7482_state *state)
 	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
 			  V4L2_CID_HUE, ADV7482_CP_HUE_MIN,
 			  ADV7482_CP_HUE_MAX, 1, ADV7482_CP_HUE_DEF);
+	ctrl = v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+				 V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1, 1);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE;
 
 	state->sd.ctrl_handler = &state->ctrl_hdl;
 	if (state->ctrl_hdl.error) {
@@ -1307,7 +1352,9 @@ static int adv7482_cp_init_controls(struct adv7482_state *state)
 
 static int adv7482_sdp_init_controls(struct adv7482_state *state)
 {
-	v4l2_ctrl_handler_init(&state->ctrl_hdl, 4);
+	struct v4l2_ctrl *ctrl;
+
+	v4l2_ctrl_handler_init(&state->ctrl_hdl, 5);
 
 	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
 			  V4L2_CID_BRIGHTNESS, ADV7482_SDP_BRI_MIN,
@@ -1321,6 +1368,10 @@ static int adv7482_sdp_init_controls(struct adv7482_state *state)
 	v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
 			  V4L2_CID_HUE, ADV7482_SDP_HUE_MIN,
 			  ADV7482_SDP_HUE_MAX, 1, ADV7482_SDP_HUE_DEF);
+	ctrl = v4l2_ctrl_new_std(&state->ctrl_hdl, &adv7482_ctrl_ops,
+				 V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1, 1);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE;
 
 	state->sd.ctrl_handler = &state->ctrl_hdl;
 	if (state->ctrl_hdl.error) {
