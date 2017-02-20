@@ -30,6 +30,7 @@
 	psci {
 		compatible = "arm,psci-0.2";
 		method = "smc";
+		arm,psci-system-suspend-is-power-down;
 	};
 
 	cpus {
