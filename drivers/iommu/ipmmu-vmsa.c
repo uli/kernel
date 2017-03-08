@@ -19,6 +19,7 @@
 #include <linux/iommu.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_iommu.h>
 #include <linux/platform_device.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
@@ -41,6 +42,7 @@ struct ipmmu_features {
 struct ipmmu_vmsa_device {
 	struct device *dev;
 	void __iomem *base;
+	struct iommu_device iommu;
 	struct list_head list;
 	const struct ipmmu_features *features;
 	bool is_leaf;
@@ -1161,6 +1163,25 @@ static int ipmmu_probe(struct platform_device *pdev)
 		ipmmu_device_reset(mmu);
 	}
 
+#if defined(CONFIG_IOMMU_DMA)
+	/*
+	 * Register the IPMMU to the IOMMU subsystem in the following cases:
+	 * - R-Car Gen2 IPMMU (all devices registered)
+	 * - R-Car Gen3 IPMMU (leaf devices only - skip root IPMMU-MM device)
+	 */
+	if (!mmu->features->has_cache_leaf_nodes || mmu->is_leaf) {
+		ret = iommu_device_register(&mmu->iommu);
+		if (ret)
+			return ret;
+
+		iommu_device_set_ops(&mmu->iommu, &ipmmu_ops);
+		iommu_device_set_fwnode(&mmu->iommu,
+					&pdev->dev.of_node->fwnode);
+
+		if (!iommu_present(&platform_bus_type))
+			bus_set_iommu(&platform_bus_type, &ipmmu_ops);
+	}
+#endif
 	/*
 	 * We can't create the ARM mapping here as it requires the bus to have
 	 * an IOMMU, which only happens when bus_set_iommu() is called in
@@ -1204,15 +1225,22 @@ static struct platform_driver ipmmu_driver = {
 
 static int __init ipmmu_init(void)
 {
+	static bool setup_done;
 	int ret;
+
+	if (setup_done)
+		return 0;
 
 	ret = platform_driver_register(&ipmmu_driver);
 	if (ret < 0)
 		return ret;
 
+#if defined(CONFIG_ARM) && !defined(CONFIG_IOMMU_DMA)
 	if (!iommu_present(&platform_bus_type))
 		bus_set_iommu(&platform_bus_type, &ipmmu_ops);
+#endif
 
+	setup_done = true;
 	return 0;
 }
 
@@ -1223,6 +1251,17 @@ static void __exit ipmmu_exit(void)
 
 subsys_initcall(ipmmu_init);
 module_exit(ipmmu_exit);
+
+#ifdef CONFIG_IOMMU_DMA
+static int __init ipmmu_vmsa_iommu_of_setup(struct device_node *np)
+{
+	ipmmu_init();
+	return 0;
+}
+
+IOMMU_OF_DECLARE(ipmmu_vmsa_iommu_of, "renesas,ipmmu-vmsa",
+		 ipmmu_vmsa_iommu_of_setup);
+#endif
 
 MODULE_DESCRIPTION("IOMMU API for Renesas VMSA-compatible IPMMU");
 MODULE_AUTHOR("Laurent Pinchart <laurent.pinchart@ideasonboard.com>");
