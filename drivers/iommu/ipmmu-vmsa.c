@@ -23,6 +23,7 @@
 #include <linux/platform_device.h>
 #include <linux/sizes.h>
 #include <linux/slab.h>
+#include <linux/sys_soc.h>
 
 #if defined(CONFIG_ARM) && !defined(CONFIG_IOMMU_DMA)
 #include <asm/dma-iommu.h>
@@ -770,6 +771,10 @@ static int ipmmu_init_platform_device(struct device *dev)
 	int num_utlbs;
 	int ret = -ENODEV;
 
+	/* Initialize once - xlate() will call multiple times */
+	if (to_archdata(dev))
+		return 0;
+
 	/* Find the master corresponding to the device. */
 
 	num_utlbs = of_count_phandle_with_args(dev->of_node, "iommus",
@@ -1043,6 +1048,17 @@ static struct iommu_group *ipmmu_find_group_dma(struct device *dev)
 	return group;
 }
 
+static bool ipmmu_slave_whitelist(struct device *dev)
+{
+	/* By default, do not allow use of IPMMU */
+	return false;
+}
+
+static const struct soc_device_attribute soc_r8a7795[] = {
+	{ .soc_id = "r8a7795", },
+	{ /* sentinel */ }
+};
+
 static int ipmmu_of_xlate_dma(struct device *dev,
 			      struct of_phandle_args *spec)
 {
@@ -1051,6 +1067,18 @@ static int ipmmu_of_xlate_dma(struct device *dev,
 	 * even though the iommu device is disabled
 	 */
 	if (!of_device_is_available(spec->np))
+		return -ENODEV;
+
+	/* Failing in ->attach_device() results in a hang, so make
+	 * sure the root device is installed before going there
+	 */
+	if (!__ipmmu_find_root()) {
+		dev_info(dev, "Unable to locate IPMMU root device\n");
+		return -ENODEV;
+	}
+
+	/* For R-Car Gen3 use a white list to opt-in slave devices */
+	if (soc_device_match(soc_r8a7795) && !ipmmu_slave_whitelist(dev))
 		return -ENODEV;
 
 	return ipmmu_init_platform_device(dev);
@@ -1095,10 +1123,21 @@ static const struct ipmmu_features ipmmu_features_default = {
 	.twobit_imttbcr_sl0 = false,
 };
 
+static const struct ipmmu_features ipmmu_features_r8a7795 = {
+	.use_ns_alias_offset = false,
+	.has_cache_leaf_nodes = true,
+	.has_eight_ctx = true,
+	.setup_imbuscr = false,
+	.twobit_imttbcr_sl0 = true,
+};
+
 static const struct of_device_id ipmmu_of_ids[] = {
 	{
 		.compatible = "renesas,ipmmu-vmsa",
 		.data = &ipmmu_features_default,
+	}, {
+		.compatible = "renesas,ipmmu-r8a7795",
+		.data = &ipmmu_features_r8a7795,
 	}, {
 		/* Terminator */
 	},
@@ -1287,6 +1326,8 @@ static int __init ipmmu_vmsa_iommu_of_setup(struct device_node *np)
 }
 
 IOMMU_OF_DECLARE(ipmmu_vmsa_iommu_of, "renesas,ipmmu-vmsa",
+		 ipmmu_vmsa_iommu_of_setup);
+IOMMU_OF_DECLARE(ipmmu_r8a7795_iommu_of, "renesas,ipmmu-r8a7795",
 		 ipmmu_vmsa_iommu_of_setup);
 #endif
 
