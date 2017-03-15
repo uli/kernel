@@ -49,7 +49,7 @@
 	 (icd)->vb_vidq.streaming :			\
 	 vb2_is_streaming(&(icd)->vb2_vidq))
 
-#define MAP_MAX_NUM 32
+#define MAP_MAX_NUM 128
 static DECLARE_BITMAP(device_map, MAP_MAX_NUM);
 static LIST_HEAD(hosts);
 static LIST_HEAD(devices);
@@ -1106,6 +1106,18 @@ static int soc_camera_s_parm(struct file *file, void *fh,
 	return -ENOIOCTLCMD;
 }
 
+static int soc_camera_g_edid(struct file *file, void *fh,
+			     struct v4l2_edid *edid)
+{
+	struct soc_camera_device *icd = file->private_data;
+	struct soc_camera_host *ici = to_soc_camera_host(icd->parent);
+
+	if (ici->ops->get_edid)
+		return ici->ops->get_edid(icd, edid);
+
+	return -ENOIOCTLCMD;
+}
+
 static int soc_camera_probe(struct soc_camera_host *ici,
 			    struct soc_camera_device *icd);
 
@@ -1664,7 +1676,7 @@ static void scan_of_host(struct soc_camera_host *ici)
 		of_node_put(ren);
 
 		if (i) {
-			dev_err(dev, "multiple subdevices aren't supported yet!\n");
+			dev_dbg(dev, "multiple subdevices aren't supported yet!\n");
 			break;
 		}
 	}
@@ -2077,6 +2089,7 @@ static const struct v4l2_ioctl_ops soc_camera_ioctl_ops = {
 	.vidioc_s_selection	 = soc_camera_s_selection,
 	.vidioc_g_parm		 = soc_camera_g_parm,
 	.vidioc_s_parm		 = soc_camera_s_parm,
+	.vidioc_g_edid		 = soc_camera_g_edid,
 };
 
 static int video_dev_create(struct soc_camera_device *icd)
