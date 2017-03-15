@@ -12,6 +12,29 @@ config SOC_CAMERA_MAX9286_MAX9271
 	help
 	  This is a MAXIM max9286-max9271 GMSL driver
 
+config SOC_CAMERA_OV106XX
+	tristate "ov106xx camera support"
+	depends on SOC_CAMERA && SOC_CAMERA_MAX9286_MAX9271 && I2C
+	help
+	  This is a runtime detected OmniVision ov10635 or ov490-ov10640
+	  sensors camera driver
+
+if !SOC_CAMERA_OV106XX
+
+config SOC_CAMERA_OV10635
+	tristate "ov10635 camera support"
+	depends on SOC_CAMERA && SOC_CAMERA_MAX9286_MAX9271 && I2C
+	help
+	  This is an OmniVision ov10635 sensor camera driver
+
+config SOC_CAMERA_OV490_OV10640
+	tristate "ov490-ov10640 camera support"
+	depends on SOC_CAMERA && SOC_CAMERA_MAX9286_MAX9271 && I2C
+	help
+	  This is an OmniVision ov490-ov10640 sensor camera driver
+
+endif
+
 config SOC_CAMERA_MT9M001
 	tristate "mt9m001 support"
 	depends on SOC_CAMERA && I2C
