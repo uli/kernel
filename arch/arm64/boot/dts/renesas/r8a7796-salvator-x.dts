@@ -404,6 +404,7 @@
 			csi20_in: endpoint@0 {
 				clock-lanes = <0>;
 				data-lanes = <1>;
+				csi-rate = <300>;
 				remote-endpoint = <&adv7482_txb>;
 			};
 		};
@@ -422,8 +423,10 @@
 
 			csi40_in: endpoint@0 {
 				clock-lanes = <0>;
+				virtual,channel = <3>;
 				data-lanes = <1 2 3 4>;
-				remote-endpoint = <&adv7482_txa>;
+				csi-rate = <300>;
+				remote-endpoint = <&ov106xx_in0>;
 			};
 		};
 	};
