@@ -296,6 +296,68 @@
 			};
 		};
 	};
+
+	ov106xx@0 {
+		compatible = "ovti,ov106xx";
+		reg = <0x60>;
+
+		port@0 {
+			ov106xx_in0: endpoint {
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+				remote-endpoint = <&csi40_in>;
+			};
+		};
+		port@1 {
+			ov106xx_max9286_des0ep0: endpoint@0 {
+				remote-endpoint = <&max9286_des0ep0>;
+			};
+		};
+	};
+
+	max9286-max9271@0 {
+		compatible = "maxim,max9286-max9271";
+		reg = <0x4c>;
+		gpios = <&gpio6 30 GPIO_ACTIVE_LOW>;
+		maxim,sensor_delay = <0>;
+		maxim,links = <4>;
+		maxim,lanes = <4>;
+		maxim,resetb-gpio = <1>;
+		maxim,fsync-mode = "automatic";
+		maxim,timeout = <100>;
+		maxim,i2c-quirk = <0x6c>;
+
+		port@0 {
+			max9286_des0ep0: endpoint@0 {
+				max9271-addr = <0x50>;
+				dvp-order = <1>;
+				remote-endpoint = <&ov106xx_in0>;
+			};
+/*			max9286_des0ep1: endpoint@1 {
+				max9271-addr = <0x51>;
+				dvp-order = <1>;
+				remote-endpoint = <&ov106xx_in1>;
+			};
+			max9286_des0ep2: endpoint@2 {
+				max9271-addr = <0x52>;
+				dvp-order = <1>;
+				remote-endpoint = <&ov106xx_in2>;
+			};
+			max9286_des0ep3: endpoint@3 {
+				max9271-addr = <0x53>;
+				dvp-order = <1>;
+				remote-endpoint = <&ov106xx_in3>;
+			}; */
+		};
+		port@1 {
+			max9286_csi0ep0: endpoint {
+				csi-rate = <700>;
+				remote-endpoint = <&csi40>;
+			};
+		};
+	};
+
+
 };
 
 &vin0 {
