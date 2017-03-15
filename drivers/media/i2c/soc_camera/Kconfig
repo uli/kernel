@@ -35,6 +35,12 @@ config SOC_CAMERA_OV490_OV10640
 
 endif
 
+config SOC_CAMERA_TI964_TI913
+	tristate "ti964-ti913 FPDLinkIII support"
+	depends on SOC_CAMERA && I2C
+	help
+	  This is an Texas Instruments ti964-ti913 FPDLinkIII driver
+
 config SOC_CAMERA_MT9M001
 	tristate "mt9m001 support"
 	depends on SOC_CAMERA && I2C
