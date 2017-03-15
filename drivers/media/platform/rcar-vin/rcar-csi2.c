@@ -368,6 +368,9 @@ static int rcar_csi2_start(struct rcar_csi2 *priv)
 		else
 			vcdt2 |= tmp << ((i % 2) * 16);
 	}
+	/* XXX: ov hack */
+	vcdt = 0x81008000;
+	vcdt2 = 0x83008200;
 
 	switch (priv->lanes) {
 	case 1:
