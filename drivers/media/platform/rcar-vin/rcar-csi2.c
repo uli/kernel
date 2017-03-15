@@ -193,6 +193,7 @@ struct rcar_csi2 {
 
 	unsigned short lanes;
 	unsigned char lane_swap[4];
+	unsigned int csi_rate;
 
 	struct v4l2_subdev subdev;
 	struct media_pad pads[RCAR_CSI2_PAD_MAX];
@@ -482,11 +483,16 @@ static int rcar_csi2_parse_dt(struct rcar_csi2 *priv)
 		return -EINVAL;
 
 	ret = v4l2_of_parse_endpoint(ep, &v4l2_ep);
-	of_node_put(ep);
 	if (ret) {
 		dev_err(priv->dev, "Could not parse v4l2 endpoint\n");
 		return -EINVAL;
 	}
+	ret = of_property_read_u32(ep, "csi-rate", &priv->csi_rate);
+	if (ret < 0) {
+		printk(KERN_ERR "csi-rate not set\n");
+		return ret;
+	}
+	of_node_put(ep);
 
 	if (v4l2_ep.bus_type != V4L2_MBUS_CSI2) {
 		dev_err(priv->dev, "Unsupported media bus type for %s\n",
@@ -584,7 +590,7 @@ static int rcar_csi2_probe(struct platform_device *pdev)
 
 	pm_runtime_enable(&pdev->dev);
 
-	dev_info(priv->dev, "%d lanes found\n", priv->lanes);
+	dev_info(priv->dev, "%d lanes found, link freq %d\n", priv->lanes, priv->csi_rate);
 
 	return 0;
 }
