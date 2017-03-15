@@ -22,7 +22,7 @@
 	};
 
 	chosen {
-		bootargs = "ignore_loglevel";
+		bootargs = "ignore_loglevel rw root=/dev/nfs cma=64M ip=dhcp";
 		stdout-path = "serial0:115200n8";
 	};
 
@@ -260,4 +260,121 @@
 &wdt0 {
 	timeout-sec = <60>;
 	status = "okay";
+};
+
+&i2c4 {
+	status = "okay";
+
+	clock-frequency = <100000>;
+
+	video_receiver@70 {
+		compatible = "adi,adv7482";
+		reg = <0x70>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@10 {
+			reg = <10>;
+			adv7482_txa: endpoint@1 {
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+				remote-endpoint = <&csi40_in>;
+			};
+		};
+	};
+
+	/*
+	   This is a HACK and is in reality the same dev as 0x70
+	   But due to V4L2 limitations we need it to be two subdevices
+	   to test VIN + CSI2. There will be two instances of the
+	   ADV7482 driver controlling the same chip, but *most* parts
+	   are independent of the other and i2c is used in a bad way
+	   so it sort of works to test.
+	*/
+	video_receiver@34 {
+		compatible = "adi,adv7482";
+		reg = <0x34>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@11 {
+			reg = <11>;
+			adv7482_txb: endpoint@1 {
+				clock-lanes = <0>;
+				data-lanes = <1>;
+				remote-endpoint = <&csi20_in>;
+			};
+		};
+	};
+};
+
+&vin0 {
+	status = "okay";
+};
+
+&vin1 {
+	status = "okay";
+};
+
+&vin2 {
+	status = "okay";
+};
+
+&vin3 {
+	status = "okay";
+};
+
+&vin4 {
+	status = "okay";
+};
+
+&vin5 {
+	status = "okay";
+};
+
+&vin6 {
+	status = "okay";
+};
+
+&vin7 {
+	status = "okay";
+};
+
+&csi20 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			csi20_in: endpoint@0 {
+				clock-lanes = <0>;
+				data-lanes = <1>;
+				remote-endpoint = <&adv7482_txb>;
+			};
+		};
+	};
+};
+
+&csi40 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			csi40_in: endpoint@0 {
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+				remote-endpoint = <&adv7482_txa>;
+			};
+		};
+	};
 };
