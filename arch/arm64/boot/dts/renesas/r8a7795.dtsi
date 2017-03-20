@@ -1692,6 +1692,7 @@
 			compatible = "renesas,fcpv";
 			reg = <0 0xfe9af000 0 0x200>;
 			clocks = <&cpg CPG_MOD 611>;
+			iommus = <&ipmmu_vp 8>;
 			power-domains = <&sysc R8A7795_PD_A3VP>;
 		};
 
@@ -1709,6 +1710,7 @@
 			compatible = "renesas,fcpv";
 			reg = <0 0xfe9bf000 0 0x200>;
 			clocks = <&cpg CPG_MOD 610>;
+			iommus = <&ipmmu_vp 9>;
 			power-domains = <&sysc R8A7795_PD_A3VP>;
 		};
 
@@ -1726,6 +1728,7 @@
 			compatible = "renesas,fcpv";
 			reg = <0 0xfe9cf000 0 0x200>;
 			clocks = <&cpg CPG_MOD 609>;
+			iommus = <&ipmmu_vp 10>;
 			power-domains = <&sysc R8A7795_PD_A3VP>;
 		};
 
