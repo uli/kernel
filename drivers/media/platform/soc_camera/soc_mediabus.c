@@ -1,6 +1,7 @@
 /*
  * soc-camera media bus helper routines
  *
+ * Copyright (C) 2016 Renesas Electronics Corporation
  * Copyright (C) 2009, Guennadi Liakhovetski <g.liakhovetski@gmx.de>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -53,6 +54,16 @@ static const struct soc_mbus_lookup mbus_fmt[] = {
 		.name			= "VYUY",
 		.bits_per_sample	= 8,
 		.packing		= SOC_MBUS_PACKING_2X8_PADHI,
+		.order			= SOC_MBUS_ORDER_LE,
+		.layout			= SOC_MBUS_LAYOUT_PACKED,
+	},
+}, {
+	.code = MEDIA_BUS_FMT_YUYV10_2X10,
+	.fmt = {
+		.fourcc			= V4L2_PIX_FMT_YUYV,
+		.name			= "YUYV",
+		.bits_per_sample	= 10,
+		.packing		= SOC_MBUS_PACKING_2X10_PADHI,
 		.order			= SOC_MBUS_ORDER_LE,
 		.layout			= SOC_MBUS_LAYOUT_PACKED,
 	},

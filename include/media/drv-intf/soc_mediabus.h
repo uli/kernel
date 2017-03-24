@@ -1,6 +1,7 @@
 /*
  * SoC-camera Media Bus API extensions
  *
+ * Copyright (C) 2016 Renesas Electronics Corporation
  * Copyright (C) 2009, Guennadi Liakhovetski <g.liakhovetski@gmx.de>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -21,6 +22,8 @@
  * @SOC_MBUS_PACKING_2X8_PADHI:	16 bits transferred in 2 8-bit samples, in the
  *				possibly incomplete byte high bits are padding
  * @SOC_MBUS_PACKING_2X8_PADLO:	as above, but low bits are padding
+ * @SOC_MBUS_PACKING_2X10_PADHI:20 bits transferred in 2 10-bit samples. The
+ *                              high bits are padding
  * @SOC_MBUS_PACKING_EXTEND16:	sample width (e.g., 10 bits) has to be extended
  *				to 16 bits
  * @SOC_MBUS_PACKING_VARIABLE:	compressed formats with variable packing
@@ -33,6 +36,7 @@ enum soc_mbus_packing {
 	SOC_MBUS_PACKING_NONE,
 	SOC_MBUS_PACKING_2X8_PADHI,
 	SOC_MBUS_PACKING_2X8_PADLO,
+	SOC_MBUS_PACKING_2X10_PADHI,
 	SOC_MBUS_PACKING_EXTEND16,
 	SOC_MBUS_PACKING_VARIABLE,
 	SOC_MBUS_PACKING_1_5X8,
