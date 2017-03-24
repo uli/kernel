@@ -32,6 +32,12 @@
  */
 
 static const struct rvin_video_format rvin_formats[] = {
+//#ifdef ENABLE_EXT_CAMERA
+	{
+		.fourcc			= V4L2_PIX_FMT_NV12,
+		.bpp			= 1,
+	},
+//#endif
 	{
 		.fourcc			= V4L2_PIX_FMT_NV16,
 		.bpp			= 1,

@@ -1204,6 +1204,11 @@ static void rvin_stop_streaming(struct vb2_queue *vq)
 
 	vin->state = STOPPING;
 
+//#ifdef ENABLE_EXT_CAMERA
+	if (rvin_capture_active(vin))
+		vin->state = RUNNING;
+//#endif
+
 	/* Wait for streaming to stop */
 	while (retries++ < RVIN_RETRIES) {
 
