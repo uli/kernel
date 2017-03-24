@@ -77,6 +77,13 @@ config SOC_CAMERA_OV9740
 	help
 	  This is a ov9740 camera driver
 
+config SOC_CAMERA_MAX9286_OV10635
+	tristate "max9286-ov10635 camera support"
+	depends on SOC_CAMERA && I2C
+	help
+	  This is an MAXIM max9286-max9271 with OmniVision ov10635 sensor
+	  camera driver
+
 config SOC_CAMERA_RJ54N1
 	tristate "rj54n1cb0c support"
 	depends on SOC_CAMERA && I2C
