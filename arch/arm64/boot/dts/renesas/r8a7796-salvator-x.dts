@@ -267,6 +267,136 @@
 
 	clock-frequency = <100000>;
 
+	max9286-ov10635@60 {
+		compatible = "maxim,max9286-ov10635";
+		reg = <0x60>;
+		port {
+			max9286_ov10635_in: endpoint {
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+				remote-endpoint = <&csi40_in>;
+//				max9286_ov10635_out: endpoint@ {
+//					remote-endpoint = <&csi40_in>;
+//				};
+			};
+		};
+	};
+ 
+	max9286-ov10635@61 {
+		compatible = "maxim,max9286-ov10635";
+		reg = <0x61>;
+		port {
+			max9286_ov10635_in1: endpoint {
+				clock-lanes = <0>;
+				data-lanes = <1 2 3 4>;
+//				remote-endpoint = <&vin1ep0>;
+/*
+				max9286_ov10635_out1: endpoint@ {
+					remote-endpoint = <&csi2_40_in1_ep>;
+				};
+*/
+	                };
+	        };
+	};
+
+	max9286-ov10635@2 {
+	        compatible = "maxim,max9286-ov10635";
+	        reg = <0x62>;
+                port {
+	                max9286_ov10635_in2: endpoint {
+                                clock-lanes = <0>;
+                                data-lanes = <1 2 3 4>;
+//	                        remote-endpoint = <&vin2ep0>;
+/*
+	                        max9286_ov10635_out2: endpoint@ {
+	                                remote-endpoint = <&csi2_40_in2_ep>;
+	                        };
+*/
+	                };
+	        };
+	};
+ 
+	max9286-ov10635@3 {
+	        compatible = "maxim,max9286-ov10635";
+	        reg = <0x63>;
+	        port {
+	                max9286_ov10635_in3: endpoint {
+	                        clock-lanes = <0>;
+	                        data-lanes = <1 2 3 4>;
+//	                        remote-endpoint = <&vin3ep0>;
+/*
+	                        max9286_ov10635_out3: endpoint@ {
+	                                remote-endpoint = <&csi2_40_in3_ep>;
+	                        };
+*/
+	                };
+	        };
+	};
+
+#if 0
+	max9286-ov10635@4 {
+	        compatible = "maxim,max9286-ov10635";
+	        reg = <0x64>;
+	        port {
+	                max9286_ov10635_in4: endpoint {
+	                        clock-lanes = <0>;
+	                        data-lanes = <1 2 3 4>;
+	                        remote-endpoint = <&vin4ep0>;
+	                        max9286_ov10635_out4: endpoint@ {
+	                                remote-endpoint = <&csi2_41_in_ep>;
+                                };
+                        };
+                };
+        };
+ 
+	max9286-ov10635@5 {
+	        compatible = "maxim,max9286-ov10635";
+	        reg = <0x65>;
+	        port {
+	                max9286_ov10635_in5: endpoint {
+	                        clock-lanes = <0>;
+	                        data-lanes = <1 2 3 4>;
+	                        remote-endpoint = <&vin5ep0>;
+	                };
+	        };
+	};
+
+	max9286-ov10635@6 {
+	        compatible = "maxim,max9286-ov10635";
+	        reg = <0x66>;
+	        port {
+	                max9286_ov10635_in6: endpoint {
+	                        clock-lanes = <0>;
+	                        data-lanes = <1 2 3 4>;
+	                        remote-endpoint = <&vin6ep0>;
+	                };
+	        };
+	};
+
+	max9286-ov10635@7 {
+	        compatible = "maxim,max9286-ov10635";
+	        reg = <0x67>;
+	        port {
+	                max9286_ov10635_in7: endpoint {
+	                        clock-lanes = <0>;
+	                        data-lanes = <1 2 3 4>;
+	                        remote-endpoint = <&vin7ep0>;
+	                };
+	        };
+	};
+#endif
+
+	maxim_setup@0 {
+	        compatible = "maxim,max9286-ov10635-setup";
+	        reg = <0x4C>;
+	        gpios = <&gpio6 30 GPIO_ACTIVE_HIGH>;
+	};
+
+	maxim_setup@1 {
+	        compatible = "maxim,max9286-ov10635-setup";
+	        reg = <0x6c>;
+	};
+
 	video_receiver@70 {
 		compatible = "adi,adv7482";
 		reg = <0x70>;
@@ -373,7 +503,7 @@
 			csi40_in: endpoint@0 {
 				clock-lanes = <0>;
 				data-lanes = <1 2 3 4>;
-				remote-endpoint = <&adv7482_txa>;
+				remote-endpoint = <&max9286_ov10635_in>;
 			};
 		};
 	};
