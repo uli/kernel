@@ -11,7 +11,7 @@
 
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/regulator/regulator.h>
+//#include <dt-bindings/regulator/regulator.h>
 #include "mt8173.dtsi"
 #include "mt8173-pinfunc.h"
 
@@ -210,19 +210,6 @@
 	status = "okay";
 };
 
-&gpu {
-	mfgsys-power-supply = <&da9211_vgpu_reg>;
-	operating-points = <
-		253500 1000000
-		299000 1000000
-		396500 1000000
-		455000 1000000
-		494000 1130000
-		598000 1130000
-	>;
-	status = "okay";
-};
-
 &hdmi0 {
 	status = "okay";
 
@@ -284,9 +271,9 @@
 				regulator-max-microamp  = <4400000>;
 				regulator-ramp-delay = <10000>;
 				regulator-always-on;
-				regulator-supported-modes =
+/*				regulator-supported-modes =
 					<REGULATOR_OPERATION_MODE_FAST
-					 REGULATOR_OPERATION_MODE_NORMAL>;
+					 REGULATOR_OPERATION_MODE_NORMAL>;*/
 			};
 
 			da9211_vgpu_reg: BUCKB {
@@ -851,9 +838,9 @@
 				regulator-max-microvolt = <1350000>;
 				regulator-ramp-delay = <12500>;
 				regulator-always-on;
-				regulator-supported-modes =
+/*				regulator-supported-modes =
 					<REGULATOR_OPERATION_MODE_FAST
-					 REGULATOR_OPERATION_MODE_NORMAL>;
+					 REGULATOR_OPERATION_MODE_NORMAL>;*/
 			};
 
 			mt6397_vpca7_reg: buck_vpca7 {
@@ -1079,13 +1066,6 @@
 
 &uart0 {
 	status = "okay";
-};
-
-&usb30 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&usb_pins>;
-	vusb33-supply = <&mt6397_vusb_reg>;
-	mediatek,wakeup-src = <1>;
 };
 
 #include "../../../../arm/boot/dts/cros-ec-keyboard.dtsi"
