@@ -410,6 +410,8 @@ static bool rvin_mbus_supported(struct rvin_dev *vin)
 		case MEDIA_BUS_FMT_UYVY8_2X8:
 		case MEDIA_BUS_FMT_UYVY10_2X10:
 		case MEDIA_BUS_FMT_RGB888_1X24:
+		case MEDIA_BUS_FMT_YUYV10_2X10:
+		case MEDIA_BUS_FMT_YUYV8_2X8:
 			vin->code = code.code;
 			return true;
 		default:

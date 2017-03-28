@@ -267,7 +267,8 @@ static int rcar_csi2_calc_phypll(struct rcar_csi2 *priv,
 	if (ret < 0) {
 		dev_err(priv->dev, "no link freq control in subdev %s\n",
 			source->name);
-		return ret;
+		ctrl.value64 = 450000000;
+		//return ret;
 	}
 
 	switch (mf->code) {
@@ -282,8 +283,8 @@ static int rcar_csi2_calc_phypll(struct rcar_csi2 *priv,
 		bpp = 8;
 		break;
 	default:
-		bpp = 24;
-		dev_warn(priv->dev, "Unknown bits per pixel assume 24\n");
+		bpp = 8;
+		dev_warn(priv->dev, "Unknown bits per pixel assume 8\n");
 		break;
 	}
 

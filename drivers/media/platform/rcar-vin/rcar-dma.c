@@ -664,6 +664,7 @@ static int rvin_setup(struct rvin_dev *vin)
 		input_is_yuv = true;
 		break;
 	case MEDIA_BUS_FMT_UYVY8_2X8:
+	case MEDIA_BUS_FMT_YUYV8_2X8:	// hack
 		/* BT.656 8bit YCbCr422 or BT.601 8bit YCbCr422 */
 		vnmc |= vin->mbus_cfg.type == V4L2_MBUS_BT656 ?
 			VNMC_INF_YUV8_BT656 : VNMC_INF_YUV8_BT601;
@@ -673,6 +674,7 @@ static int rvin_setup(struct rvin_dev *vin)
 		vnmc |= VNMC_INF_RGB888;
 		break;
 	case MEDIA_BUS_FMT_UYVY10_2X10:
+	case MEDIA_BUS_FMT_YUYV10_2X10:	// hack
 		/* BT.656 10bit YCbCr422 or BT.601 10bit YCbCr422 */
 		vnmc |= vin->mbus_cfg.type == V4L2_MBUS_BT656 ?
 			VNMC_INF_YUV10_BT656 : VNMC_INF_YUV10_BT601;
@@ -1136,6 +1138,8 @@ static int rvin_set_stream(struct rvin_dev *vin, int on)
 		case MEDIA_BUS_FMT_UYVY8_2X8:
 		case MEDIA_BUS_FMT_UYVY10_2X10:
 		case MEDIA_BUS_FMT_RGB888_1X24:
+		case MEDIA_BUS_FMT_YUYV10_2X10:
+		case MEDIA_BUS_FMT_YUYV8_2X8:
 			vin->code = fmt.format.code;
 			break;
 		default:
