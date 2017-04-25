@@ -820,6 +820,28 @@ struct media_pad *media_entity_remote_pad(struct media_pad *pad);
 struct media_entity *media_entity_get(struct media_entity *entity);
 
 /**
+ * media_entity_pad_from_dt_regs - Get pad number from DT regs
+ *
+ * @entity: The entity
+ * @port_reg: DT port
+ * @reg: DT reg
+ * @pad: Pointer to pad which will be filled in
+ *
+ * This function can be used to resolve the media pad number from
+ * DT port and reg numbers. This is useful for devices which
+ * uses more complex mappings of media pads then that the
+ * DT port number is equivalent to the media pad number.
+ *
+ * If the entity do not implement the pad_from_dt_regs() operation
+ * this function assumes DT port is equivalent to media pad number
+ * and sets @pad to @port_reg.
+ *
+ * Return: 0 on success else -EINVAL.
+ */
+int media_entity_pad_from_dt_regs(struct media_entity *entity,
+				  int port_reg, int reg, unsigned int *pad);
+
+/**
  * media_graph_walk_init - Allocate resources used by graph walk.
  *
  * @graph: Media graph structure that will be used to walk the graph
