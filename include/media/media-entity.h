@@ -171,6 +171,9 @@ struct media_pad {
 
 /**
  * struct media_entity_operations - Media entity operations
+ * @pad_from_dt_regs:	Return the pad number based on DT port and reg
+ *			properties. This operation can be used to map a
+ *			DT port and reg to a media pad number. Optional.
  * @link_setup:		Notify the entity of link changes. The operation can
  *			return an error, in which case link setup will be
  *			cancelled. Optional.
@@ -184,6 +187,7 @@ struct media_pad {
  *    mutex held.
  */
 struct media_entity_operations {
+	int (*pad_from_dt_regs)(int port_reg, int reg, unsigned int *pad);
 	int (*link_setup)(struct media_entity *entity,
 			  const struct media_pad *local,
 			  const struct media_pad *remote, u32 flags);
