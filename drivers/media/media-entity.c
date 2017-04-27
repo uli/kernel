@@ -386,6 +386,27 @@ struct media_entity *media_graph_walk_next(struct media_graph *graph)
 }
 EXPORT_SYMBOL_GPL(media_graph_walk_next);
 
+int media_entity_pad_from_dt_regs(struct media_entity *entity,
+				  int port_reg, int reg, unsigned int *pad)
+{
+	int ret;
+
+	if (!entity->ops || !entity->ops->pad_from_dt_regs) {
+		*pad = port_reg;
+		return 0;
+	}
+
+	ret = entity->ops->pad_from_dt_regs(port_reg, reg, pad);
+	if (ret)
+		return ret;
+
+	if (*pad >= entity->num_pads)
+		return -EINVAL;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(media_entity_pad_from_dt_regs);
+
 /* -----------------------------------------------------------------------------
  * Pipeline management
  */
