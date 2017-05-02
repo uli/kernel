@@ -364,7 +364,7 @@ int dma_configure(struct device *dev)
 	}
 
 	if (dma_dev->of_node) {
-		ret = of_dma_configure(dev, dma_dev->of_node);
+		of_dma_configure(dev, dma_dev->of_node);
 	} else if (has_acpi_companion(dma_dev)) {
 		attr = acpi_get_dma_attr(to_acpi_device_node(dma_dev->fwnode));
 		if (attr != DEV_DMA_NOT_SUPPORTED)
@@ -374,7 +374,7 @@ int dma_configure(struct device *dev)
 	if (bridge)
 		pci_put_host_bridge_device(bridge);
 
-	return ret;
+	return 0;
 }
 
 void dma_deconfigure(struct device *dev)
