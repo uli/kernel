@@ -136,12 +136,13 @@ static void v4l2_async_cleanup(struct v4l2_subdev *sd)
 	sd->dev = NULL;
 }
 
-int v4l2_async_notifier_register(struct v4l2_device *v4l2_dev,
-				 struct v4l2_async_notifier *notifier)
+static int v4l2_async_do_notifier_register(struct v4l2_device *v4l2_dev,
+					   struct v4l2_async_notifier *notifier,
+					   bool subnotifier)
 {
 	struct v4l2_subdev *sd, *tmp;
 	struct v4l2_async_subdev *asd;
-	int i;
+	int found, i;
 
 	if (!notifier->num_subdevs || notifier->num_subdevs > V4L2_MAX_SUBDEVS)
 		return -EINVAL;
@@ -168,32 +169,69 @@ int v4l2_async_notifier_register(struct v4l2_device *v4l2_dev,
 		list_add_tail(&asd->list, &notifier->waiting);
 	}
 
-	mutex_lock(&list_lock);
+	if (!subnotifier)
+		mutex_lock(&list_lock);
 
-	list_for_each_entry_safe(sd, tmp, &subdev_list, async_list) {
-		int ret;
+	/*
+	 * This function can be called recursively so the list
+	 * might be modified in a recursive call. Start from the
+	 * top of the list each iteration.
+	 */
+	found = 1;
+	while (found) {
+		found = 0;
 
-		asd = v4l2_async_belongs(notifier, sd);
-		if (!asd)
-			continue;
+		list_for_each_entry_safe(sd, tmp, &subdev_list, async_list) {
+			int ret;
 
-		ret = v4l2_async_test_notify(notifier, sd, asd);
-		if (ret < 0) {
-			mutex_unlock(&list_lock);
-			return ret;
+			asd = v4l2_async_belongs(notifier, sd);
+			if (!asd)
+				continue;
+
+			ret = v4l2_async_test_notify(notifier, sd, asd);
+			if (ret < 0) {
+				if (!subnotifier)
+					mutex_unlock(&list_lock);
+				return ret;
+			}
+
+			found = 1;
+			break;
 		}
 	}
 
 	/* Keep also completed notifiers on the list */
 	list_add(&notifier->list, &notifier_list);
 
-	mutex_unlock(&list_lock);
+	if (!subnotifier)
+		mutex_unlock(&list_lock);
 
 	return 0;
 }
+
+int v4l2_async_subnotifier_register(struct v4l2_subdev *sd,
+				    struct v4l2_async_notifier *notifier)
+{
+	if (!sd->v4l2_dev) {
+		dev_err(sd->dev ? sd->dev : NULL,
+			"Can't register subnotifier for without v4l2_dev\n");
+		return -EINVAL;
+	}
+
+	return v4l2_async_do_notifier_register(sd->v4l2_dev, notifier, true);
+}
+EXPORT_SYMBOL(v4l2_async_subnotifier_register);
+
+int v4l2_async_notifier_register(struct v4l2_device *v4l2_dev,
+				 struct v4l2_async_notifier *notifier)
+{
+	return v4l2_async_do_notifier_register(v4l2_dev, notifier, false);
+}
 EXPORT_SYMBOL(v4l2_async_notifier_register);
 
-void v4l2_async_notifier_unregister(struct v4l2_async_notifier *notifier)
+static void
+v4l2_async_do_notifier_unregister(struct v4l2_async_notifier *notifier,
+				  bool subnotifier)
 {
 	struct v4l2_subdev *sd, *tmp;
 	unsigned int notif_n_subdev = notifier->num_subdevs;
@@ -210,7 +248,8 @@ void v4l2_async_notifier_unregister(struct v4l2_async_notifier *notifier)
 			"Failed to allocate device cache!\n");
 	}
 
-	mutex_lock(&list_lock);
+	if (!subnotifier)
+		mutex_lock(&list_lock);
 
 	list_del(&notifier->list);
 
@@ -237,15 +276,20 @@ void v4l2_async_notifier_unregister(struct v4l2_async_notifier *notifier)
 			put_device(d);
 	}
 
-	mutex_unlock(&list_lock);
+	if (!subnotifier)
+		mutex_unlock(&list_lock);
 
 	/*
 	 * Call device_attach() to reprobe devices
 	 *
 	 * NOTE: If dev allocation fails, i is 0, and the whole loop won't be
 	 * executed.
+	 * TODO: If we are unregistering a subdevice notifier we can't reprobe
+	 * since the lock_list is held by the master device and attaching that
+	 * device would call v4l2_async_register_subdev() and end in a deadlock
+	 * on list_lock.
 	 */
-	while (i--) {
+	while (i-- && !subnotifier) {
 		struct device *d = dev[i];
 
 		if (d && device_attach(d) < 0) {
@@ -268,6 +312,17 @@ void v4l2_async_notifier_unregister(struct v4l2_async_notifier *notifier)
 	 * Don't care about the waiting list, it is initialised and populated
 	 * upon notifier registration.
 	 */
+}
+
+void v4l2_async_subnotifier_unregister(struct v4l2_async_notifier *notifier)
+{
+	v4l2_async_do_notifier_unregister(notifier, true);
+}
+EXPORT_SYMBOL(v4l2_async_subnotifier_unregister);
+
+void v4l2_async_notifier_unregister(struct v4l2_async_notifier *notifier)
+{
+	v4l2_async_do_notifier_unregister(notifier, false);
 }
 EXPORT_SYMBOL(v4l2_async_notifier_unregister);
 
