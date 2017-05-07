@@ -49,6 +49,11 @@ struct vsp1_du_atomic_config {
 	struct v4l2_rect dst;
 	unsigned int alpha;
 	unsigned int zpos;
+	struct {
+		bool enabled;
+		u32 key;
+		u32 alpha;
+	} colorkey;
 };
 
 void vsp1_du_atomic_begin(struct device *dev, unsigned int pipe_index);

@@ -243,8 +243,14 @@ static void rpf_configure(struct vsp1_entity *entity,
 	}
 
 	vsp1_rpf_write(rpf, dl, VI6_RPF_MSK_CTRL, 0);
-	vsp1_rpf_write(rpf, dl, VI6_RPF_CKEY_CTRL, 0);
-
+	if (rpf->colorkey.enabled) {
+		vsp1_rpf_write(rpf, dl, VI6_RPF_CKEY_SET0,
+			       (rpf->colorkey.alpha << 24) | rpf->colorkey.key);
+		vsp1_rpf_write(rpf, dl, VI6_RPF_CKEY_CTRL,
+			       VI6_RPF_CKEY_CTRL_SAPE0);
+	} else {
+		vsp1_rpf_write(rpf, dl, VI6_RPF_CKEY_CTRL, 0);
+	}
 }
 
 static void rpf_partition(struct vsp1_entity *entity,
