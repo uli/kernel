@@ -397,6 +397,13 @@ config VIDEO_VPX3220
 	  To compile this driver as a module, choose M here: the
 	  module will be called vpx3220.
 
+config VIDEO_MAX9260
+	tristate "Maxim MAX9260 GMSL deserializer support"
+	depends on I2C
+	depends on I2C_MUX
+	help
+	  This driver supports the Maxim MAX9260 GMSL deserializer.
+
 comment "Video and audio decoders"
 
 config VIDEO_SAA717X
