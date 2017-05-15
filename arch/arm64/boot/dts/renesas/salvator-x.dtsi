@@ -489,6 +489,16 @@
 
 	uart-has-rtscts;
 	status = "okay";
+
+	gmsl-deserializer@0 {
+		compatible = "maxim,max9260";
+		mux-enable-gpio = <&gpio6 13 GPIO_ACTIVE_LOW>;
+		mux-select-gpios = <&gpio6 11 GPIO_ACTIVE_HIGH>,
+				   <&gpio6 12 GPIO_ACTIVE_HIGH>;
+	};
+	/* XXX: Cannot add other devices here because serdev tries to
+	 * register all of them with the same name...
+	 */
 };
 
 &scif2 {
