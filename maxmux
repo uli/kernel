@@ -1,0 +1,81 @@
+#!/usr/bin/python
+# Operates the MAX9260 multiplexer in Blanche V2H boards from userspace.
+
+import os
+from sys import exit, argv
+
+SCG = '/sys/class/gpio'
+
+# define multiplexer GPIOs per platform
+compat = open('/sys/firmware/devicetree/base/compatible', 'r').read()
+if 'salvator-x' in compat:
+  gpios = ((6, 11), (6, 12), (6, 13), (6, 21))
+elif 'blanche' in compat:
+  gpios = ((5, 12), (5, 13), (5, 14), (5, 15))
+else:
+  print 'unknown platform "' + compat + '"'
+  exit(1)
+
+# find kernel GPIO number bases for each GPIO controller
+base = {}
+for c in os.listdir(SCG):
+  if not c.startswith('gpiochip'):
+    continue
+  # Randomly numbered sysfs entry points to a device that has a node with a
+  # number that is actually related to the order the GPIO controllers are
+  # defined in the DT.
+  for cc in os.listdir(SCG + '/' + c + '/device'):
+    if cc.startswith('gpiochip'):
+      chip = int(cc[8:])
+      base[chip] = int(c[8:])
+      break
+#print base
+
+# converts sane GPIO IDs to random kernel GPIO numbers
+def gpio_num(g):
+  return base[g[0]] + g[1]
+
+# sets GPIO values
+def set_gpio(g, val):
+  f = open(SCG + '/gpio' + str(gpio_num(g)) + '/value', 'w')
+  f.write(str(val) + '\n')
+  f.close()
+  
+# ensure that GPIO sysfs interface is available
+if not os.path.exists(SCG):
+  print SCG + ' not available'
+  exit(1)
+
+# get index of MAX9260 to be enabled
+try:
+  max9260 = int(argv[1])
+except:
+  print 'Usage: ' + argv[0] + ' <MAX9260 index>'
+  exit(1)
+
+if (max9260 < 0 or max9260 > 5):
+  print 'invalid MAX9260 index'
+  exit(1)
+
+# make GPIOs available to userspace and set direction to output
+for i in gpios:
+  if not os.path.exists(SCG + '/gpio' + str(gpio_num(i))):
+    f = open(SCG + '/export', 'w')
+    f.write(str(gpio_num(i))+'\n')
+    f.close()
+  f = open(SCG + '/gpio' + str(gpio_num(i)) + '/direction', 'w')
+  f.write('out\n')
+  f.close()
+
+# enable the correct multiplexer
+if max9260 < 4:
+  set_gpio(gpios[3], 1)
+  set_gpio(gpios[2], 0)
+else:
+  set_gpio(gpios[2], 1)
+  set_gpio(gpios[3], 0)
+  max9260 -= 4
+
+# switch multiplexer
+set_gpio(gpios[0], max9260 & 1)
+set_gpio(gpios[1], (max9260 >> 1) & 1)
