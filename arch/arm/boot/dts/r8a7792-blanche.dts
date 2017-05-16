@@ -21,6 +21,7 @@
 	aliases {
 		serial0 = &scif0;
 		serial1 = &scif3;
+		serial2 = &scif1;
 	};
 
 	chosen {
@@ -202,6 +203,11 @@
 		function = "scif0";
 	};
 
+	scif1_pins: scif1 {
+		groups = "scif1_data";
+		function = "scif1";
+	};
+
 	scif3_pins: scif3 {
 		groups = "scif3_data";
 		function = "scif3";
@@ -244,6 +250,20 @@
 	pinctrl-names = "default";
 
 	status = "okay";
+};
+
+&scif1 {
+	pinctrl-0 = <&scif1_pins>;
+	pinctrl-names = "default";
+
+	status = "okay";
+
+	gmsl-deserializer@0 {
+		compatible = "maxim,max9260";
+		mux-enable-gpio = <&gpio5 15 GPIO_ACTIVE_LOW>;
+		mux-select-gpios = <&gpio5 12 GPIO_ACTIVE_HIGH>,
+				   <&gpio5 13 GPIO_ACTIVE_HIGH>;
+	};
 };
 
 &scif3 {
