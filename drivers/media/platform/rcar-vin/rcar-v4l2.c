@@ -23,6 +23,7 @@
 #include "rcar-vin.h"
 
 #define RVIN_DEFAULT_FORMAT	V4L2_PIX_FMT_YUYV
+#define RVIN_DEFAULT_COLORSPACE	V4L2_COLORSPACE_SRGB
 
 /* -----------------------------------------------------------------------------
  * Format Conversions
@@ -114,6 +115,10 @@ static int rvin_format_align(struct rvin_dev *vin, struct v4l2_pix_format *pix)
 		pix->field = V4L2_FIELD_NONE;
 		break;
 	}
+
+	/* Check that colorspace is reasonable */
+	if (!pix->colorspace || pix->colorspace >= 0xff)
+		pix->colorspace = RVIN_DEFAULT_COLORSPACE;
 
 	/* HW limit width to a multiple of 32 (2^5) for NV16 else 2 (2^1) */
 	walign = vin->format.pixelformat == V4L2_PIX_FMT_NV16 ? 5 : 1;
