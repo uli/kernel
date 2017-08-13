@@ -1015,7 +1015,7 @@
 				regulator-compatible = "ldo_vgp3";
 				regulator-name = "vcamaf";
 				regulator-min-microvolt = <1620000>;
-				regulator-max-microvolt = <1980000>;
+				regulator-max-microvolt = <3300000>;
 				regulator-enable-ramp-delay = <218>;
 			};
 
