@@ -155,6 +155,23 @@
 		gpio = <&pio 85 GPIO_ACTIVE_HIGH>;
 	};
 
+	usb_p1_vbus: regulator@3 {
+		compatible = "regulator-fixed";
+		regulator-name = "usb_vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+//		gpio = <&pio 130 GPIO_ACTIVE_HIGH>;
+//		enable-active-high;
+	};
+
+	usb_p0_vbus: regulator@4 {
+		compatible = "regulator-fixed";
+		regulator-name = "vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+//		gpio = <&pio 9 GPIO_ACTIVE_HIGH>;
+//		enable-active-high;
+	};
 	sound: sound {
 		compatible = "mediatek,mt8173-rt5650-rt5514";
 		mediatek,audio-codec = <&rt5650 &rt5514>;
@@ -788,6 +805,20 @@
 		};
 	};
 
+	usb_id_pins_float: usb_iddig_pull_up {
+		pins_iddig {
+			pinmux = <MT8173_PIN_16_IDDIG__FUNC_IDDIG>;
+			bias-pull-up;
+		};
+	};
+
+	usb_id_pins_ground: usb_iddig_pull_down {
+		pins_iddig {
+			pinmux = <MT8173_PIN_16_IDDIG__FUNC_IDDIG>;
+			bias-pull-down;
+		};
+	};
+
 	wifi_wake_pins: wifi_wake_pins {
 		pins1 {
 			pinmux = <MT8173_PIN_38_CONN_RST__FUNC_GPIO38>;
@@ -1065,6 +1096,26 @@
 };
 
 &uart0 {
+	status = "okay";
+};
+
+&ssusb {
+	vusb33-supply = <&mt6397_vusb_reg>;
+	vbus-supply = <&usb_p0_vbus>;
+//	extcon = <&extcon_usb>;
+	dr_mode = "host";
+	mediatek,enable-wakeup;
+	pinctrl-names = "default", "id_float", "id_ground";
+//	pinctrl-0 = <&usb_pins>;
+	pinctrl-0 = <&usb_id_pins_float>;
+	pinctrl-1 = <&usb_id_pins_float>;
+	pinctrl-2 = <&usb_id_pins_ground>;
+	status = "okay";
+};
+
+&usb_host {
+	vusb33-supply = <&mt6397_vusb_reg>;
+	vbus-supply = <&usb_p1_vbus>;
 	status = "okay";
 };
 
