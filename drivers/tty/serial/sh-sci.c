@@ -1107,8 +1107,14 @@ static ssize_t rx_fifo_timeout_show(struct device *dev,
 {
 	struct uart_port *port = dev_get_drvdata(dev);
 	struct sci_port *sci = to_sci_port(port);
+	u16 v;
 
-	return sprintf(buf, "%d\n", sci->rx_fifo_timeout);
+	if (port->type == PORT_HSCIF)
+		v = serial_port_in(port, SCSCR) >> HSSCR_TOT_SHIFT;
+	else
+		v = sci->rx_fifo_timeout;
+
+	return sprintf(buf, "%d\n", v);
 }
 
 static ssize_t rx_fifo_timeout_store(struct device *dev,
@@ -1118,17 +1124,27 @@ static ssize_t rx_fifo_timeout_store(struct device *dev,
 {
 	struct uart_port *port = dev_get_drvdata(dev);
 	struct sci_port *sci = to_sci_port(port);
+	u16 hsscr;
 	int ret;
 	long r;
 
 	ret = kstrtol(buf, 0, &r);
 	if (ret)
 		return ret;
-	sci->rx_fifo_timeout = r;
-	scif_set_rtrg(port, 1);
-	if (r > 0)
-		setup_timer(&sci->rx_fifo_timer, rx_fifo_timer_fn,
-			    (unsigned long)sci);
+
+	if (port->type == PORT_HSCIF) {
+		if (r < 0 || r > 3)
+			return -EINVAL;
+		hsscr = serial_port_in(port, SCSCR) & ~HSSCR_TOT_MASK;
+		serial_port_out(port, SCSCR, hsscr | (r << HSSCR_TOT_SHIFT));
+	} else {
+		sci->rx_fifo_timeout = r;
+		scif_set_rtrg(port, 1);
+		if (r > 0)
+			setup_timer(&sci->rx_fifo_timer, rx_fifo_timer_fn,
+				    (unsigned long)sci);
+	}
+
 	return count;
 }
 
@@ -2186,7 +2202,11 @@ static void sci_reset(struct uart_port *port)
 	unsigned int status;
 	struct sci_port *s = to_sci_port(port);
 
-	serial_port_out(port, SCSCR, 0x00);	/* TE=0, RE=0, CKE1=0 */
+	if (port->type == PORT_HSCIF)
+		serial_port_out(port, SCSCR,
+				serial_port_in(port, SCSCR) & HSSCR_TOT_MASK);
+	else
+		serial_port_out(port, SCSCR, 0x00);	/* TE=0, RE=0, CKE1=0 */
 
 	reg = sci_getreg(port, SCFCR);
 	if (reg->size)
@@ -2227,6 +2247,9 @@ static void sci_set_termios(struct uart_port *port, struct ktermios *termios,
 	int min_err = INT_MAX, err;
 	unsigned long max_freq = 0;
 	int best_clk = -1;
+
+	if (port->type == PORT_HSCIF)
+		scr_val = serial_port_in(port, SCSCR) & ~HSSCR_TOT_MASK;
 
 	if ((termios->c_cflag & CSIZE) == CS7)
 		smr_val |= SCSMR_CHR;
@@ -2988,7 +3011,8 @@ static int sci_remove(struct platform_device *dev)
 		sysfs_remove_file(&dev->dev.kobj,
 				  &dev_attr_rx_fifo_trigger.attr);
 	}
-	if (port->port.type == PORT_SCIFA || port->port.type == PORT_SCIFB) {
+	if (port->port.type == PORT_SCIFA || port->port.type == PORT_SCIFB ||
+	    port->port.type == PORT_HSCIF) {
 		sysfs_remove_file(&dev->dev.kobj,
 				  &dev_attr_rx_fifo_timeout.attr);
 	}
@@ -3174,7 +3198,8 @@ static int sci_probe(struct platform_device *dev)
 		if (ret)
 			return ret;
 	}
-	if (sp->port.type == PORT_SCIFA || sp->port.type ==  PORT_SCIFB) {
+	if (sp->port.type == PORT_SCIFA || sp->port.type == PORT_SCIFB ||
+	    sp->port.type == PORT_HSCIF) {
 		ret = sysfs_create_file(&dev->dev.kobj,
 				&dev_attr_rx_fifo_timeout.attr);
 		if (ret) {
