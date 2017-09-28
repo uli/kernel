@@ -153,6 +153,7 @@ struct sci_port {
 	struct timer_list		rx_fifo_timer;
 	int				rx_fifo_timeout;
 	u16				hscif_tot;
+	u16				hscif_srhp;
 
 	bool has_rtscts;
 	bool autorts;
@@ -991,6 +992,42 @@ static int sci_handle_breaks(struct uart_port *port)
 
 	return copied;
 }
+
+static ssize_t rx_sampling_point_show(struct device *dev,
+			       struct device_attribute *attr,
+			       char *buf)
+{
+	struct uart_port *port = dev_get_drvdata(dev);
+	struct sci_port *sci = to_sci_port(port);
+
+	return sprintf(buf, "%d\n", sci->hscif_srhp);
+}
+
+static ssize_t rx_sampling_point_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf,
+				size_t count)
+{
+	struct uart_port *port = dev_get_drvdata(dev);
+	struct sci_port *sci = to_sci_port(port);
+	int ret;
+	long r;
+
+	ret = kstrtol(buf, 0, &r);
+	if (ret)
+		return ret;
+
+	if (r < -8 || r > 7)
+		return -EINVAL;
+
+	sci->hscif_srhp = r;
+
+	return count;
+}
+
+static DEVICE_ATTR(rx_sampling_point, 0644,
+		   rx_sampling_point_show,
+		   rx_sampling_point_store);
 
 static int scif_set_rtrg(struct uart_port *port, int rx_trig)
 {
@@ -2378,8 +2415,6 @@ done:
 		serial_port_out(port, SCSCR, scr_val | s->hscif_tot);
 		serial_port_out(port, SCSMR, smr_val);
 		serial_port_out(port, SCBRR, brr);
-		if (sci_getreg(port, HSSRR)->size)
-			serial_port_out(port, HSSRR, srr | HSCIF_SRE);
 
 		/* Wait one bit interval */
 		udelay((1000000 + (baud - 1)) / baud);
@@ -2391,6 +2426,18 @@ done:
 		dev_dbg(port->dev, "SCR 0x%x SMR 0x%x\n", scr_val, smr_val);
 		serial_port_out(port, SCSCR, scr_val | s->hscif_tot);
 		serial_port_out(port, SCSMR, smr_val);
+	}
+
+	if (sci_getreg(port, HSSRR)->size) {
+		u16 hssrr = srr | HSCIF_SRE;
+
+		if (s->hscif_srhp) {
+			u16 srhp = (s->hscif_srhp << HSCIF_SRHP_SHIFT) &
+				   HSCIF_SRHP_MASK;
+
+			hssrr |= HSCIF_SRDE | srhp;
+		}
+		serial_port_out(port, HSSRR, hssrr);
 	}
 
 	sci_init_pins(port, termios->c_cflag);
@@ -2793,6 +2840,7 @@ static int sci_init_single(struct platform_device *dev,
 
 	sci_port->rx_fifo_timeout = 0;
 	sci_port->hscif_tot = 0;
+	sci_port->hscif_shrp = 0;
 
 	/* SCIFA on sh7723 and sh7724 need a custom sampling rate that doesn't
 	 * match the SoC datasheet, this should be investigated. Let platform
@@ -3013,6 +3061,10 @@ static int sci_remove(struct platform_device *dev)
 		sysfs_remove_file(&dev->dev.kobj,
 				  &dev_attr_rx_fifo_timeout.attr);
 	}
+	if (port->port.type == PORT_HSCIF) {
+		sysfs_remove_file(&dev->dev.kobj,
+				  &dev_attr_rx_sampling_point.attr);
+	}
 
 	return 0;
 }
@@ -3205,6 +3257,12 @@ static int sci_probe(struct platform_device *dev)
 			}
 			return ret;
 		}
+	}
+	if (sp->port.type == PORT_HSCIF) {
+		ret = sysfs_create_file(&dev->dev.kobj,
+				&dev_attr_rx_sampling_point.attr);
+		if (ret)
+			return ret;
 	}
 
 #ifdef CONFIG_SH_STANDARD_BIOS
