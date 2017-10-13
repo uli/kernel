@@ -1168,6 +1168,11 @@ static void pm_genpd_complete(struct device *dev)
 	genpd_unlock(genpd);
 }
 
+static bool pm_genpd_active_wakeup_true(struct device *dev)
+{
+	return true;
+}
+
 /**
  * genpd_syscore_switch - Switch power during system core suspend or resume.
  * @dev: Device that normally is marked as "always on" to switch power for.
@@ -1214,6 +1219,7 @@ EXPORT_SYMBOL_GPL(pm_genpd_syscore_poweron);
 #define pm_genpd_poweroff_noirq		NULL
 #define pm_genpd_restore_noirq		NULL
 #define pm_genpd_complete		NULL
+#define pm_genpd_active_wakeup_true	NULL
 
 #endif /* CONFIG_PM_SLEEP */
 
@@ -1587,6 +1593,8 @@ int pm_genpd_init(struct generic_pm_domain *genpd,
 		genpd->dev_ops.stop = pm_clk_suspend;
 		genpd->dev_ops.start = pm_clk_resume;
 	}
+	if (genpd->flags & GENPD_FLAG_ACTIVE_WAKEUP)
+		genpd->dev_ops.active_wakeup = pm_genpd_active_wakeup_true;
 
 	/* Always-on domains must be powered on at initialization. */
 	if (genpd_is_always_on(genpd) && !genpd_status_on(genpd))
