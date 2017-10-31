@@ -184,7 +184,7 @@ static int dsa_ds_complete(struct dsa_switch_tree *dst, struct dsa_switch *ds)
 		if (err != 0)
 			return err;
 
-		ds->dsa_port_mask |= BIT(index);
+		port->type = DSA_PORT_TYPE_DSA;
 	}
 
 	return 0;
@@ -219,7 +219,7 @@ static int dsa_dsa_port_apply(struct dsa_port *port)
 	struct dsa_switch *ds = port->ds;
 	int err;
 
-	err = dsa_cpu_dsa_setup(port);
+	err = dsa_port_fixed_link_register_of(port);
 	if (err) {
 		dev_warn(ds->dev, "Failed to setup dsa port %d: %d\n",
 			 port->index, err);
@@ -235,7 +235,7 @@ static int dsa_dsa_port_apply(struct dsa_port *port)
 static void dsa_dsa_port_unapply(struct dsa_port *port)
 {
 	devlink_port_unregister(&port->devlink_port);
-	dsa_cpu_dsa_destroy(port);
+	dsa_port_fixed_link_unregister_of(port);
 }
 
 static int dsa_cpu_port_apply(struct dsa_port *port)
@@ -243,7 +243,7 @@ static int dsa_cpu_port_apply(struct dsa_port *port)
 	struct dsa_switch *ds = port->ds;
 	int err;
 
-	err = dsa_cpu_dsa_setup(port);
+	err = dsa_port_fixed_link_register_of(port);
 	if (err) {
 		dev_warn(ds->dev, "Failed to setup cpu port %d: %d\n",
 			 port->index, err);
@@ -259,9 +259,7 @@ static int dsa_cpu_port_apply(struct dsa_port *port)
 static void dsa_cpu_port_unapply(struct dsa_port *port)
 {
 	devlink_port_unregister(&port->devlink_port);
-	dsa_cpu_dsa_destroy(port);
-	port->ds->cpu_port_mask &= ~BIT(port->index);
-
+	dsa_port_fixed_link_unregister_of(port);
 }
 
 static int dsa_user_port_apply(struct dsa_port *port)
@@ -279,7 +277,7 @@ static int dsa_user_port_apply(struct dsa_port *port)
 	if (err) {
 		dev_warn(ds->dev, "Failed to create slave %d: %d\n",
 			 port->index, err);
-		port->netdev = NULL;
+		port->slave = NULL;
 		return err;
 	}
 
@@ -289,7 +287,7 @@ static int dsa_user_port_apply(struct dsa_port *port)
 	if (err)
 		return err;
 
-	devlink_port_type_eth_set(&port->devlink_port, port->netdev);
+	devlink_port_type_eth_set(&port->devlink_port, port->slave);
 
 	return 0;
 }
@@ -297,10 +295,9 @@ static int dsa_user_port_apply(struct dsa_port *port)
 static void dsa_user_port_unapply(struct dsa_port *port)
 {
 	devlink_port_unregister(&port->devlink_port);
-	if (port->netdev) {
-		dsa_slave_destroy(port->netdev);
-		port->netdev = NULL;
-		port->ds->enabled_port_mask &= ~(1 << port->index);
+	if (port->slave) {
+		dsa_slave_destroy(port->slave);
+		port->slave = NULL;
 	}
 }
 
@@ -315,7 +312,7 @@ static int dsa_ds_apply(struct dsa_switch_tree *dst, struct dsa_switch *ds)
 	 * the slave MDIO bus driver rely on these values for probing PHY
 	 * devices or not
 	 */
-	ds->phys_mii_mask = ds->enabled_port_mask;
+	ds->phys_mii_mask |= dsa_user_ports(ds);
 
 	/* Add the switch to devlink before calling setup, so that setup can
 	 * add dpipe tables
@@ -335,12 +332,6 @@ static int dsa_ds_apply(struct dsa_switch_tree *dst, struct dsa_switch *ds)
 	err = dsa_switch_register_notifier(ds);
 	if (err)
 		return err;
-
-	if (ds->ops->set_addr) {
-		err = ds->ops->set_addr(ds, dst->cpu_dp->netdev->dev_addr);
-		if (err < 0)
-			return err;
-	}
 
 	if (!ds->slave_mii_bus && ds->ops->phy_read) {
 		ds->slave_mii_bus = devm_mdiobus_alloc(ds->dev);
@@ -433,18 +424,17 @@ static int dsa_dst_apply(struct dsa_switch_tree *dst)
 			return err;
 	}
 
-	if (dst->cpu_dp) {
-		err = dsa_cpu_port_ethtool_setup(dst->cpu_dp);
-		if (err)
-			return err;
-	}
-
 	/* If we use a tagging format that doesn't have an ethertype
 	 * field, make sure that all packets from this point on get
 	 * sent to the tag format's receive function.
 	 */
 	wmb();
-	dst->cpu_dp->netdev->dsa_ptr = dst;
+	dst->cpu_dp->master->dsa_ptr = dst->cpu_dp;
+
+	err = dsa_master_ethtool_setup(dst->cpu_dp->master);
+	if (err)
+		return err;
+
 	dst->applied = true;
 
 	return 0;
@@ -458,7 +448,9 @@ static void dsa_dst_unapply(struct dsa_switch_tree *dst)
 	if (!dst->applied)
 		return;
 
-	dst->cpu_dp->netdev->dsa_ptr = NULL;
+	dsa_master_ethtool_restore(dst->cpu_dp->master);
+
+	dst->cpu_dp->master->dsa_ptr = NULL;
 
 	/* If we used a tagging format that doesn't have an ethertype
 	 * field, make sure that all packets from this point get sent
@@ -474,10 +466,7 @@ static void dsa_dst_unapply(struct dsa_switch_tree *dst)
 		dsa_ds_unapply(dst, ds);
 	}
 
-	if (dst->cpu_dp) {
-		dsa_cpu_port_ethtool_restore(dst->cpu_dp);
-		dst->cpu_dp = NULL;
-	}
+	dst->cpu_dp = NULL;
 
 	pr_info("DSA: tree %d unapplied\n", dst->tree);
 	dst->applied = false;
@@ -487,6 +476,7 @@ static int dsa_cpu_parse(struct dsa_port *port, u32 index,
 			 struct dsa_switch_tree *dst,
 			 struct dsa_switch *ds)
 {
+	const struct dsa_device_ops *tag_ops;
 	enum dsa_tag_protocol tag_protocol;
 	struct net_device *ethernet_dev;
 	struct device_node *ethernet;
@@ -507,24 +497,23 @@ static int dsa_cpu_parse(struct dsa_port *port, u32 index,
 
 	if (!dst->cpu_dp) {
 		dst->cpu_dp = port;
-		dst->cpu_dp->netdev = ethernet_dev;
+		dst->cpu_dp->master = ethernet_dev;
 	}
 
-	/* Initialize cpu_port_mask now for drv->setup()
-	 * to have access to a correct value, just like what
-	 * net/dsa/dsa.c::dsa_switch_setup_one does.
-	 */
-	ds->cpu_port_mask |= BIT(index);
+	port->type = DSA_PORT_TYPE_CPU;
 
 	tag_protocol = ds->ops->get_tag_protocol(ds);
-	dst->tag_ops = dsa_resolve_tag_protocol(tag_protocol);
-	if (IS_ERR(dst->tag_ops)) {
+	tag_ops = dsa_resolve_tag_protocol(tag_protocol);
+	if (IS_ERR(tag_ops)) {
 		dev_warn(ds->dev, "No tagger for this switch\n");
-		ds->cpu_port_mask &= ~BIT(index);
-		return PTR_ERR(dst->tag_ops);
+		return PTR_ERR(tag_ops);
 	}
 
-	dst->rcv = dst->tag_ops->rcv;
+	dst->cpu_dp->tag_ops = tag_ops;
+
+	/* Make a few copies for faster access in master receive hot path */
+	dst->cpu_dp->rcv = dst->cpu_dp->tag_ops->rcv;
+	dst->cpu_dp->dst = dst;
 
 	return 0;
 }
@@ -546,11 +535,7 @@ static int dsa_ds_parse(struct dsa_switch_tree *dst, struct dsa_switch *ds)
 			if (err)
 				return err;
 		} else {
-			/* Initialize enabled_port_mask now for drv->setup()
-			 * to have access to a correct value, just like what
-			 * net/dsa/dsa.c::dsa_switch_setup_one does.
-			 */
-			ds->enabled_port_mask |= BIT(index);
+			port->type = DSA_PORT_TYPE_USER;
 		}
 
 	}
