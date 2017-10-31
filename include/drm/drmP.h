@@ -75,6 +75,7 @@
 #include <drm/drm_sarea.h>
 #include <drm/drm_drv.h>
 #include <drm/drm_prime.h>
+#include <drm/drm_print.h>
 #include <drm/drm_pci.h>
 #include <drm/drm_file.h>
 #include <drm/drm_debugfs.h>
@@ -298,7 +299,6 @@ struct pci_controller;
 /*@{*/
 
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
-
 
 /**
  * drm_drv_uses_atomic_modeset - check if the driver implements
