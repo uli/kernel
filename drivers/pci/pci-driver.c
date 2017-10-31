@@ -680,17 +680,13 @@ static int pci_pm_prepare(struct device *dev)
 {
 	struct device_driver *drv = dev->driver;
 
-	/*
-	 * Devices having power.ignore_children set may still be necessary for
-	 * suspending their children in the next phase of device suspend.
-	 */
-	if (dev->power.ignore_children)
-		pm_runtime_resume(dev);
-
 	if (drv && drv->pm && drv->pm->prepare) {
 		int error = drv->pm->prepare(dev);
-		if (error)
+		if (error < 0)
 			return error;
+
+		if (!error && dev_pm_test_driver_flags(dev, DPM_FLAG_SMART_PREPARE))
+			return 0;
 	}
 	return pci_dev_keep_suspended(to_pci_dev(dev));
 }
@@ -804,6 +800,9 @@ static int pci_pm_suspend_noirq(struct device *dev)
 		if (pci_power_manageable(pci_dev))
 			pci_prepare_to_sleep(pci_dev);
 	}
+
+	dev_dbg(dev, "PCI PM: Suspend power state: %s\n",
+		pci_power_name(pci_dev->current_state));
 
 	pci_pm_set_unknown_state(pci_dev);
 
@@ -919,9 +918,6 @@ static int pci_pm_freeze(struct device *dev)
 			return error;
 	}
 
-	if (pcibios_pm_ops.freeze)
-		return pcibios_pm_ops.freeze(dev);
-
 	return 0;
 }
 
@@ -983,12 +979,6 @@ static int pci_pm_thaw(struct device *dev)
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 	int error = 0;
 
-	if (pcibios_pm_ops.thaw) {
-		error = pcibios_pm_ops.thaw(dev);
-		if (error)
-			return error;
-	}
-
 	if (pci_has_legacy_pm_support(pci_dev))
 		return pci_legacy_resume(dev);
 
@@ -1032,9 +1022,6 @@ static int pci_pm_poweroff(struct device *dev)
 
  Fixup:
 	pci_fixup_device(pci_fixup_suspend, pci_dev);
-
-	if (pcibios_pm_ops.poweroff)
-		return pcibios_pm_ops.poweroff(dev);
 
 	return 0;
 }
@@ -1107,12 +1094,6 @@ static int pci_pm_restore(struct device *dev)
 	struct pci_dev *pci_dev = to_pci_dev(dev);
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 	int error = 0;
-
-	if (pcibios_pm_ops.restore) {
-		error = pcibios_pm_ops.restore(dev);
-		if (error)
-			return error;
-	}
 
 	/*
 	 * This is necessary for the hibernation error path in which restore is
