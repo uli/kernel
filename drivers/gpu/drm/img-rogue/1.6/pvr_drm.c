@@ -332,16 +332,6 @@ struct drm_driver sPVRDRMDriver =
 	},
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3,3,0)) */
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,18,0))
-#if defined(LDM_PCI)
-	.set_busid      	= drm_pci_set_busid,
-#elif defined(LDM_PLATFORM)
-	.set_busid      	= drm_platform_set_busid,
-#else
-#error "LDM_PLATFORM or LDM_PCI must be defined"
-#endif
-#endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(3,18,0)) */
-
 	.name			= PVR_DRM_NAME,
 	.desc			= PVR_DRM_DESC,
 	.date			= PVR_DRM_DATE,
