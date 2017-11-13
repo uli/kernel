@@ -109,7 +109,7 @@ static struct platform_driver powervr_driver = {
 *****************************************************************************/
 int PVRSRVSystemInit(struct drm_device *pDrmDevice)
 {
-	struct platform_device *pDevice = pDrmDevice->platformdev;
+	struct platform_device *pDevice = to_platform_device(pDrmDevice->dev);
 	PVRSRV_ERROR err;
 
 	PVR_TRACE(("%s (pDevice=%p)", __func__, pDevice));
@@ -160,8 +160,10 @@ void PVRSRVSystemDeInit(struct platform_device *pDevice)
  @Return 0 for success or <0 for an error.
 
 *****************************************************************************/
+int PVRSRVDRMLoad(struct drm_device *dev, unsigned long flags);
 static int PVRSRVDriverProbe(struct platform_device *pDevice)
 {
+	struct drm_device *drm;
 	int result;
 
 	PVR_TRACE(("%s (pDevice=%p)", __func__, pDevice));
@@ -172,12 +174,20 @@ static int PVRSRVDriverProbe(struct platform_device *pDevice)
 			return result;
 	}
 
-	result = drm_platform_init(&sPVRDRMDriver, pDevice);
+	drm = drm_dev_alloc(&sPVRDRMDriver, &pDevice->dev);
+        if (IS_ERR(drm))
+		return PTR_ERR(drm);
+
+	platform_set_drvdata(pDevice, drm);
+
+	result = PVRSRVDRMLoad(drm, 0);
 
 	dma_set_mask(&pDevice->dev, DMA_BIT_MASK(33));
 
 	if (result == 0)
 		PVRSRVDeviceInit();
+
+	result = drm_dev_register(drm, 0);
 
 	return result;
 }

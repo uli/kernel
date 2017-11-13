@@ -107,16 +107,11 @@ DECLARE_WAIT_QUEUE_HEAD(sWaitForInit);
 IMG_BOOL bInitComplete;
 IMG_BOOL bInitFailed;
 
-static int PVRSRVDRMLoad(struct drm_device *dev, unsigned long flags)
+int PVRSRVDRMLoad(struct drm_device *dev, unsigned long flags)
 {
 	int iRes;
 
 	PVR_TRACE(("PVRSRVDRMLoad"));
-
-#if defined(LDM_PLATFORM)
-	/* The equivalent is done for PCI modesetting drivers by drm_get_pci_dev() */
-	platform_set_drvdata(dev->platformdev, dev);
-#endif
 
 	/* Module initialisation */
 	iRes = PVRSRVSystemInit(dev);
@@ -139,21 +134,6 @@ exit:
 	bInitComplete = IMG_TRUE;
 
 	return iRes;
-}
-
-static int PVRSRVDRMUnload(struct drm_device *dev)
-{
-#if defined(LDM_PLATFORM)
-	LDM_DEV *pDevice = dev->platformdev;
-#elif defined(LDM_PCI)
-	LDM_DEV *pDevice = dev->pdev;
-#endif
-
-	PVR_TRACE(("PVRSRVDRMUnload"));
-
-	PVRSRVSystemDeInit(pDevice);
-
-	return 0;
 }
 
 static int PVRSRVDRMOpen(struct drm_device *dev, struct drm_file *file)
@@ -306,8 +286,6 @@ struct drm_driver sPVRDRMDriver =
 	.driver_features	= DRIVER_MODESET | DRIVER_RENDER,
 
 	.dev_priv_size		= 0,
-	.load			= PVRSRVDRMLoad,
-	.unload			= PVRSRVDRMUnload,
 	.open			= PVRSRVDRMOpen,
 	.postclose		= PVRSRVRelease,
 
