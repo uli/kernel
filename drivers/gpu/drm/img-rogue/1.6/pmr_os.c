@@ -253,7 +253,7 @@ OSMMapPMRGeneric(PMR *psPMR, PMR_MMAP_DATA pOSMMapData)
 	ps_vma->vm_flags = ulNewFlags;
 
 #if defined (CONFIG_ARM64)
-	sPageProt = __pgprot_modify(ps_vma->vm_page_prot, 0, vm_get_page_prot(ulNewFlags));
+	sPageProt = __pgprot_modify(ps_vma->vm_page_prot, 0, pgprot_val(vm_get_page_prot(ulNewFlags)));
 #elif defined(CONFIG_ARM)
 	sPageProt = __pgprot_modify(ps_vma->vm_page_prot, L_PTE_MT_MASK, vm_get_page_prot(ulNewFlags));
 #elif defined(CONFIG_X86)
