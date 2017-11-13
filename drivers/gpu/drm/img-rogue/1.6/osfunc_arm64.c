@@ -89,8 +89,8 @@ void OSFlushCPUCacheRangeKM(void *pvVirtStart,
 							IMG_CPU_PHYADDR sCPUPhysStart,
 							IMG_CPU_PHYADDR sCPUPhysEnd)
 {
-	dma_ops->sync_single_for_device(NULL, sCPUPhysStart.uiAddr, sCPUPhysEnd.uiAddr - sCPUPhysStart.uiAddr, DMA_TO_DEVICE);
-	dma_ops->sync_single_for_cpu(NULL, sCPUPhysStart.uiAddr, sCPUPhysEnd.uiAddr - sCPUPhysStart.uiAddr, DMA_FROM_DEVICE);
+	dma_sync_single_for_device(NULL, sCPUPhysStart.uiAddr, sCPUPhysEnd.uiAddr - sCPUPhysStart.uiAddr, DMA_TO_DEVICE);
+	dma_sync_single_for_cpu(NULL, sCPUPhysStart.uiAddr, sCPUPhysEnd.uiAddr - sCPUPhysStart.uiAddr, DMA_FROM_DEVICE);
 }
 
 void OSCleanCPUCacheRangeKM(void *pvVirtStart,
@@ -98,7 +98,7 @@ void OSCleanCPUCacheRangeKM(void *pvVirtStart,
 							IMG_CPU_PHYADDR sCPUPhysStart,
 							IMG_CPU_PHYADDR sCPUPhysEnd)
 {
-	dma_ops->sync_single_for_device(NULL, sCPUPhysStart.uiAddr, sCPUPhysEnd.uiAddr - sCPUPhysStart.uiAddr, DMA_TO_DEVICE);
+	dma_sync_single_for_device(NULL, sCPUPhysStart.uiAddr, sCPUPhysEnd.uiAddr - sCPUPhysStart.uiAddr, DMA_TO_DEVICE);
 }
 
 void OSInvalidateCPUCacheRangeKM(void *pvVirtStart,
@@ -106,7 +106,7 @@ void OSInvalidateCPUCacheRangeKM(void *pvVirtStart,
 								 IMG_CPU_PHYADDR sCPUPhysStart,
 								 IMG_CPU_PHYADDR sCPUPhysEnd)
 {
-	dma_ops->sync_single_for_cpu(NULL, sCPUPhysStart.uiAddr, sCPUPhysEnd.uiAddr - sCPUPhysStart.uiAddr, DMA_FROM_DEVICE);
+	dma_sync_single_for_cpu(NULL, sCPUPhysStart.uiAddr, sCPUPhysEnd.uiAddr - sCPUPhysStart.uiAddr, DMA_FROM_DEVICE);
 }
 
 void OSUserModeAccessToPerfCountersEn(void)
