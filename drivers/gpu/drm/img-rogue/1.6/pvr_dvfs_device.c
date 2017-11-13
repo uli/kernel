@@ -94,7 +94,6 @@ static IMG_INT32 devfreq_target(struct device *dev, long unsigned *requested_fre
 	IMG_UINT32		ui32Freq, ui32CurFreq, ui32Volt;
 	struct OPP_STRUCT	*opp;
 
-	rcu_read_lock();
 	opp = devfreq_recommended_opp(dev, requested_freq, flags);
 	if (IS_ERR(opp)) {
 		rcu_read_unlock();
@@ -104,7 +103,6 @@ static IMG_INT32 devfreq_target(struct device *dev, long unsigned *requested_fre
 
 	ui32Freq = OPP_GET_FREQ(opp);
 	ui32Volt = OPP_GET_VOLTAGE(opp);
-	rcu_read_unlock();
 
 	ui32CurFreq = psRGXTimingInfo->ui32CoreClockSpeed;
 
@@ -230,11 +228,9 @@ static int GetOPPValues(struct device *dev,
 	struct dev_pm_opp *opp;
 
 	/* Start RCU read-side critical section to access device opp_list. */
-	rcu_read_lock();
 	count = OPP_GET_OPP_COUNT(dev);
 	if (count < 0) {
 		dev_err(dev, "Could not fetch OPP count, %d\n", count);
-		rcu_read_unlock();
 		return count;
 	}
 
@@ -245,7 +241,6 @@ static int GetOPPValues(struct device *dev,
 #endif
 
 	if (!freq_table) {
-		rcu_read_unlock();
 		return -ENOMEM;
 	}
 
@@ -286,8 +281,6 @@ static int GetOPPValues(struct device *dev,
 	}
 
 exit:
-
-	rcu_read_unlock();
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
 	if (!err)
