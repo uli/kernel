@@ -130,8 +130,8 @@ static const struct dma_buf_ops sPVRDmaBufOps =
 	.map_dma_buf   = PVRDmaBufOpsMap,
 	.unmap_dma_buf = PVRDmaBufOpsUnmap,
 	.release       = PVRDmaBufOpsRelease,
-	.kmap_atomic   = PVRDmaBufOpsKMap,
-	.kmap          = PVRDmaBufOpsKMap,
+	.map_atomic    = PVRDmaBufOpsKMap,
+	.map           = PVRDmaBufOpsKMap,
 	.mmap          = PVRDmaBufOpsMMap,
 };
 
