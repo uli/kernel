@@ -245,7 +245,8 @@ static u32 interpolate(int value, const int *x, const unsigned int *y, int len)
 	return ret;
 }
 
-static unsigned long mtk_mfg_get_static_power(unsigned long voltage)
+static unsigned long mtk_mfg_get_static_power(struct devfreq *devfreq,
+					      unsigned long voltage)
 {
 	struct mtk_mfg *mfg = gsDevice.hSysData;
 	struct thermal_zone_device *tz = mfg->tz;
@@ -299,7 +300,8 @@ static unsigned long mtk_mfg_get_static_power(unsigned long voltage)
 	return power;
 }
 
-static unsigned long mtk_mfg_get_dynamic_power(unsigned long freq,
+static unsigned long mtk_mfg_get_dynamic_power(struct devfreq *devfreq,
+					       unsigned long freq,
 					       unsigned long voltage)
 {
 	#define NUM_RANGE  ARRAY_SIZE(f_range)
