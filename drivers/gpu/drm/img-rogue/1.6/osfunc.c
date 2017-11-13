@@ -69,6 +69,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 #include <linux/kthread.h>
 #include <asm/atomic.h>
+#include <linux/pfn_t.h>
 
 #include "log2.h"
 #include "osfunc.h"
@@ -2381,7 +2382,7 @@ PVRSRV_ERROR OSChangeSparseMemCPUAddrMap(void **psPageArray,
 
 			if(bMixedMap )
 			{
-				eError = vm_insert_mixed(psVMA,uiCPUVirtAddr, uiPFN);
+				eError = vm_insert_mixed(psVMA,uiCPUVirtAddr, __pfn_to_pfn_t(uiPFN, PFN_DEV));
 			}
 			else
 			{
