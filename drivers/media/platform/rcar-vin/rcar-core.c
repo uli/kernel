@@ -46,46 +46,10 @@ static int rvin_find_pad(struct v4l2_subdev *sd, int direction)
 	return -EINVAL;
 }
 
-static bool rvin_mbus_supported(struct rvin_graph_entity *entity)
-{
-	struct v4l2_subdev *sd = entity->subdev;
-	struct v4l2_subdev_mbus_code_enum code = {
-		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
-	};
-
-	code.index = 0;
-	code.pad = entity->source_pad;
-	while (!v4l2_subdev_call(sd, pad, enum_mbus_code, NULL, &code)) {
-		code.index++;
-		switch (code.code) {
-		case MEDIA_BUS_FMT_YUYV8_1X16:
-		case MEDIA_BUS_FMT_UYVY8_2X8:
-		case MEDIA_BUS_FMT_UYVY10_2X10:
-		case MEDIA_BUS_FMT_RGB888_1X24:
-			entity->code = code.code;
-			return true;
-		default:
-			break;
-		}
-	}
-
-	return false;
-}
-
 static int rvin_digital_notify_complete(struct v4l2_async_notifier *notifier)
 {
 	struct rvin_dev *vin = notifier_to_vin(notifier);
 	int ret;
-
-	/* Verify subdevices mbus format */
-	if (!rvin_mbus_supported(vin->digital)) {
-		vin_err(vin, "Unsupported media bus format for %s\n",
-			vin->digital->subdev->name);
-		return -EINVAL;
-	}
-
-	vin_dbg(vin, "Found media bus format for %s: %d\n",
-		vin->digital->subdev->name, vin->digital->code);
 
 	ret = v4l2_device_register_subdev_nodes(&vin->v4l2_dev);
 	if (ret < 0) {
@@ -103,8 +67,16 @@ static void rvin_digital_notify_unbind(struct v4l2_async_notifier *notifier,
 	struct rvin_dev *vin = notifier_to_vin(notifier);
 
 	vin_dbg(vin, "unbind digital subdev %s\n", subdev->name);
+
+	mutex_lock(&vin->lock);
+
 	rvin_v4l2_unregister(vin);
+	v4l2_ctrl_handler_free(&vin->ctrl_handler);
+
+	vin->vdev.ctrl_handler = NULL;
 	vin->digital->subdev = NULL;
+
+	mutex_unlock(&vin->lock);
 }
 
 static int rvin_digital_notify_bound(struct v4l2_async_notifier *notifier,
@@ -112,12 +84,14 @@ static int rvin_digital_notify_bound(struct v4l2_async_notifier *notifier,
 				     struct v4l2_async_subdev *asd)
 {
 	struct rvin_dev *vin = notifier_to_vin(notifier);
+	struct v4l2_subdev_mbus_code_enum code = {
+		.which = V4L2_SUBDEV_FORMAT_ACTIVE,
+	};
 	int ret;
 
 	v4l2_set_subdev_hostdata(subdev, vin);
 
 	/* Find source and sink pad of remote subdevice */
-
 	ret = rvin_find_pad(subdev, MEDIA_PAD_FL_SOURCE);
 	if (ret < 0)
 		return ret;
@@ -126,20 +100,73 @@ static int rvin_digital_notify_bound(struct v4l2_async_notifier *notifier,
 	ret = rvin_find_pad(subdev, MEDIA_PAD_FL_SINK);
 	vin->digital->sink_pad = ret < 0 ? 0 : ret;
 
+	/* Find compatible subdevices mbus format */
+	vin->digital->code = 0;
+	code.index = 0;
+	code.pad = vin->digital->source_pad;
+	while (!vin->digital->code &&
+	       !v4l2_subdev_call(subdev, pad, enum_mbus_code, NULL, &code)) {
+		code.index++;
+		switch (code.code) {
+		case MEDIA_BUS_FMT_YUYV8_1X16:
+		case MEDIA_BUS_FMT_UYVY8_2X8:
+		case MEDIA_BUS_FMT_UYVY10_2X10:
+		case MEDIA_BUS_FMT_RGB888_1X24:
+			vin->digital->code = code.code;
+			vin_dbg(vin, "Found media bus format for %s: %d\n",
+				subdev->name, vin->digital->code);
+			break;
+		default:
+			break;
+		}
+	}
+
+	if (!vin->digital->code) {
+		vin_err(vin, "Unsupported media bus format for %s\n",
+			subdev->name);
+		return -EINVAL;
+	}
+
+	/* Read tvnorms */
+	ret = v4l2_subdev_call(subdev, video, g_tvnorms, &vin->vdev.tvnorms);
+	if (ret < 0 && ret != -ENOIOCTLCMD && ret != -ENODEV)
+		return ret;
+
+	mutex_lock(&vin->lock);
+
+	/* Add the controls */
+	ret = v4l2_ctrl_handler_init(&vin->ctrl_handler, 16);
+	if (ret < 0)
+		goto err;
+
+	ret = v4l2_ctrl_add_handler(&vin->ctrl_handler, subdev->ctrl_handler,
+				    NULL);
+	if (ret < 0)
+		goto err_ctrl;
+
+	vin->vdev.ctrl_handler = &vin->ctrl_handler;
+
 	vin->digital->subdev = subdev;
+
+	mutex_unlock(&vin->lock);
 
 	vin_dbg(vin, "bound subdev %s source pad: %u sink pad: %u\n",
 		subdev->name, vin->digital->source_pad,
 		vin->digital->sink_pad);
 
 	return 0;
+err_ctrl:
+	v4l2_ctrl_handler_free(&vin->ctrl_handler);
+err:
+	mutex_unlock(&vin->lock);
+	return ret;
 }
+
 static const struct v4l2_async_notifier_operations rvin_digital_notify_ops = {
 	.bound = rvin_digital_notify_bound,
 	.unbind = rvin_digital_notify_unbind,
 	.complete = rvin_digital_notify_complete,
 };
-
 
 static int rvin_digital_parse_v4l2(struct device *dev,
 				   struct v4l2_fwnode_endpoint *vep,
@@ -276,6 +303,8 @@ static int rcar_vin_remove(struct platform_device *pdev)
 
 	v4l2_async_notifier_unregister(&vin->notifier);
 	v4l2_async_notifier_cleanup(&vin->notifier);
+
+	v4l2_ctrl_handler_free(&vin->ctrl_handler);
 
 	rvin_dma_unregister(vin);
 
