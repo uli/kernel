@@ -347,10 +347,8 @@ static int rcar_csi2_wait_phy_start(struct rcar_csi2 *priv)
 	return -ETIMEDOUT;
 }
 
-static int rcar_csi2_calc_phypll(struct rcar_csi2 *priv, unsigned int bpp,
-				 u32 *phypll)
+static int rcar_csi2_calc_mbps(struct rcar_csi2 *priv, unsigned int bpp)
 {
-	const struct phypll_hsfreqrange *hsfreq;
 	struct v4l2_subdev *source;
 	struct v4l2_ctrl *ctrl;
 	u64 mbps;
@@ -375,19 +373,26 @@ static int rcar_csi2_calc_phypll(struct rcar_csi2 *priv, unsigned int bpp,
 	mbps = v4l2_ctrl_g_ctrl_int64(ctrl) * bpp;
 	do_div(mbps, priv->lanes * 2000000);
 
+	return mbps;
+}
+
+static int rcar_csi2_set_phypll(struct rcar_csi2 *priv, unsigned int mbps)
+{
+	const struct phypll_hsfreqrange *hsfreq;
+
 	for (hsfreq = priv->info->hsfreqrange; hsfreq->mbps != 0; hsfreq++)
 		if (hsfreq->mbps >= mbps)
 			break;
 
 	if (!hsfreq->mbps) {
-		dev_err(priv->dev, "Unsupported PHY speed (%llu Mbps)", mbps);
+		dev_err(priv->dev, "Unsupported PHY speed (%u Mbps)", mbps);
 		return -ERANGE;
 	}
 
-	dev_dbg(priv->dev, "PHY HSFREQRANGE requested %llu got %u Mbps\n", mbps,
+	dev_dbg(priv->dev, "PHY HSFREQRANGE requested %u got %u Mbps\n", mbps,
 		hsfreq->mbps);
 
-	*phypll = PHYPLL_HSFREQRANGE(hsfreq->reg);
+	rcar_csi2_write(priv, PHYPLL_REG, PHYPLL_HSFREQRANGE(hsfreq->reg));
 
 	return 0;
 }
@@ -395,9 +400,9 @@ static int rcar_csi2_calc_phypll(struct rcar_csi2 *priv, unsigned int bpp,
 static int rcar_csi2_start(struct rcar_csi2 *priv)
 {
 	const struct rcar_csi2_format *format;
-	u32 phycnt, phypll, vcdt = 0, vcdt2 = 0;
+	u32 phycnt, vcdt = 0, vcdt2 = 0;
 	unsigned int i;
-	int ret;
+	int mbps, ret;
 
 	dev_dbg(priv->dev, "Input size (%ux%u%c)\n",
 		priv->mf.width, priv->mf.height,
@@ -429,9 +434,9 @@ static int rcar_csi2_start(struct rcar_csi2 *priv)
 	phycnt = PHYCNT_ENABLECLK;
 	phycnt |= (1 << priv->lanes) - 1;
 
-	ret = rcar_csi2_calc_phypll(priv, format->bpp, &phypll);
-	if (ret)
-		return ret;
+	mbps = rcar_csi2_calc_mbps(priv, format->bpp);
+	if (mbps < 0)
+		return mbps;
 
 	/* Init */
 	rcar_csi2_write(priv, TREF_REG, TREF_TREF);
@@ -466,7 +471,9 @@ static int rcar_csi2_start(struct rcar_csi2 *priv)
 	}
 
 	/* Start */
-	rcar_csi2_write(priv, PHYPLL_REG, phypll);
+	ret = rcar_csi2_set_phypll(priv, mbps);
+	if (ret)
+		return ret;
 
 	/* Set frequency range if we have it */
 	if (priv->info->csi0clkfreqrange)
