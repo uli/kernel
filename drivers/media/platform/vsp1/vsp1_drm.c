@@ -38,7 +38,7 @@ static void vsp1_du_pipeline_frame_end(struct vsp1_pipeline *pipe,
 	struct vsp1_drm_pipeline *drm_pipe = to_vsp1_drm_pipeline(pipe);
 
 	if (drm_pipe->du_complete)
-		drm_pipe->du_complete(drm_pipe->du_private, completed);
+		drm_pipe->du_complete(drm_pipe->du_private, completed, 0);
 }
 
 /* -----------------------------------------------------------------------------
@@ -505,8 +505,10 @@ static unsigned int rpf_zpos(struct vsp1_device *vsp1, struct vsp1_rwpf *rpf)
  * vsp1_du_atomic_flush - Commit an atomic update
  * @dev: the VSP device
  * @pipe_index: the DRM pipeline index
+ * @cfg: atomic pipe configuration
  */
-void vsp1_du_atomic_flush(struct device *dev, unsigned int pipe_index)
+void vsp1_du_atomic_flush(struct device *dev, unsigned int pipe_index,
+			  const struct vsp1_du_atomic_pipe_config *cfg)
 {
 	struct vsp1_device *vsp1 = dev_get_drvdata(dev);
 	struct vsp1_drm_pipeline *drm_pipe = &vsp1->drm->pipe[pipe_index];
