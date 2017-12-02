@@ -400,7 +400,10 @@ static int vsp1_du_setup_rpf_pipe(struct vsp1_device *vsp1,
 	struct v4l2_subdev_selection sel;
 	struct v4l2_subdev_format format;
 	const struct v4l2_rect *crop;
+	const char *bru_name;
 	int ret;
+
+	bru_name = pipe->bru->type == VSP1_ENTITY_BRU ? "BRU" : "BRS";
 
 	/*
 	 * Configure the format on the RPF sink pad and propagate it up to the
@@ -473,9 +476,9 @@ static int vsp1_du_setup_rpf_pipe(struct vsp1_device *vsp1,
 	if (ret < 0)
 		return ret;
 
-	dev_dbg(vsp1->dev, "%s: set format %ux%u (%x) on BRU pad %u\n",
+	dev_dbg(vsp1->dev, "%s: set format %ux%u (%x) on %s pad %u\n",
 		__func__, format.format.width, format.format.height,
-		format.format.code, format.pad);
+		format.format.code, bru_name, format.pad);
 
 	sel.pad = bru_input;
 	sel.target = V4L2_SEL_TGT_COMPOSE;
@@ -486,10 +489,9 @@ static int vsp1_du_setup_rpf_pipe(struct vsp1_device *vsp1,
 	if (ret < 0)
 		return ret;
 
-	dev_dbg(vsp1->dev,
-		"%s: set selection (%u,%u)/%ux%u on BRU pad %u\n",
+	dev_dbg(vsp1->dev, "%s: set selection (%u,%u)/%ux%u on %s pad %u\n",
 		__func__, sel.r.left, sel.r.top, sel.r.width, sel.r.height,
-		sel.pad);
+		bru_name, sel.pad);
 
 	return 0;
 }
