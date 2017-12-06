@@ -299,7 +299,8 @@ static const struct rcar_du_device_info rcar_du_r8a77995_info = {
 	.features = RCAR_DU_FEATURE_CRTC_IRQ_CLOCK
 		  | RCAR_DU_FEATURE_EXT_CTRL_REGS
 		  | RCAR_DU_FEATURE_VSP1_SOURCE
-		  | RCAR_DU_FEATURE_R8A77995_REGS,
+		  | RCAR_DU_FEATURE_R8A77995_REGS
+		  | RCAR_DU_FEATURE_LVDS_PLL,
 	.quirks = RCAR_DU_QUIRK_TVM_MASTER_ONLY,
 	.channels_mask = BIT(1) | BIT(0),
 	.routes = {
