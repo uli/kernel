@@ -275,6 +275,9 @@ static void rcar_du_crtc_set_display_timing(struct rcar_du_crtc *rcrtc)
 			mode_clock, extrate, rate, escr);
 	}
 
+	if (rcar_du_has(rcdu, RCAR_DU_FEATURE_LVDS_PLL))
+		escr = 0;
+
 	rcar_du_group_write(rcrtc->group, rcrtc->index % 2 ? ESCR2 : ESCR,
 			    escr);
 	rcar_du_group_write(rcrtc->group, rcrtc->index % 2 ? OTAR2 : OTAR, 0);
