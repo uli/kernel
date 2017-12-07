@@ -323,6 +323,8 @@ static void adv7511_set_link_config(struct adv7511 *adv7511,
 	adv7511->hsync_polarity = config->hsync_polarity;
 	adv7511->vsync_polarity = config->vsync_polarity;
 	adv7511->rgb = config->input_colorspace == HDMI_COLORSPACE_RGB;
+	adv7511->min_vref = config->min_vrefresh_option;
+	adv7511->max_freq = config->max_freq_option;
 }
 
 static void __adv7511_power_on(struct adv7511 *adv7511)
@@ -659,6 +661,16 @@ static enum drm_mode_status adv7511_mode_valid(struct adv7511 *adv7511,
 {
 	if (mode->clock > 165000)
 		return MODE_CLOCK_HIGH;
+
+	if (adv7511->max_freq) {
+		if (mode->clock > (adv7511->max_freq / 1000))
+			return MODE_CLOCK_HIGH;
+	}
+
+	if (adv7511->min_vref) {
+		if (drm_mode_vrefresh(mode) < adv7511->min_vref)
+			return MODE_BAD;
+	}
 
 	return MODE_OK;
 }
@@ -1073,6 +1085,16 @@ static int adv7511_parse_dt(struct device_node *np,
 	config->sync_pulse = ADV7511_INPUT_SYNC_PULSE_NONE;
 	config->vsync_polarity = ADV7511_SYNC_POLARITY_PASSTHROUGH;
 	config->hsync_polarity = ADV7511_SYNC_POLARITY_PASSTHROUGH;
+
+	ret = of_property_read_u32(np, "max-clock",
+				   &config->max_freq_option);
+	if (ret < 0)
+		config->max_freq_option = 0;
+
+	ret = of_property_read_u32(np, "min-vrefresh",
+				   &config->min_vrefresh_option);
+	if (ret < 0)
+		config->min_vrefresh_option = 0;
 
 	return 0;
 }
