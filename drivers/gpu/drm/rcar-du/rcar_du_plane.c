@@ -432,7 +432,7 @@ static void rcar_du_plane_setup_mode(struct rcar_du_group *rgrp,
 	 * PnMR_SPIM_TP_OFF bit set in their pnmr field, disabling color keying
 	 * automatically.
 	 */
-	if ((state->colorkey & RCAR_DU_COLORKEY_MASK) == RCAR_DU_COLORKEY_NONE)
+	if (state->state.colorkey.mode == 0)
 		pnmr |= PnMR_SPIM_TP_OFF;
 
 	/* For packed YUV formats we need to select the U/V order. */
@@ -441,26 +441,30 @@ static void rcar_du_plane_setup_mode(struct rcar_du_group *rgrp,
 
 	rcar_du_plane_write(rgrp, index, PnMR, pnmr);
 
+	colorkey = ((state->state.colorkey.min >> 24) & 0x00ff0000)
+		 | ((state->state.colorkey.min >> 16) & 0x0000ff00)
+		 | ((state->state.colorkey.min >>  8) & 0x000000ff);
+
 	switch (state->format->fourcc) {
 	case DRM_FORMAT_RGB565:
-		colorkey = ((state->colorkey & 0xf80000) >> 8)
-			 | ((state->colorkey & 0x00fc00) >> 5)
-			 | ((state->colorkey & 0x0000f8) >> 3);
+		colorkey = ((colorkey & 0xf80000) >> 8)
+			 | ((colorkey & 0x00fc00) >> 5)
+			 | ((colorkey & 0x0000f8) >> 3);
 		rcar_du_plane_write(rgrp, index, PnTC2R, colorkey);
 		break;
 
 	case DRM_FORMAT_ARGB1555:
 	case DRM_FORMAT_XRGB1555:
-		colorkey = ((state->colorkey & 0xf80000) >> 9)
-			 | ((state->colorkey & 0x00f800) >> 6)
-			 | ((state->colorkey & 0x0000f8) >> 3);
+		colorkey = ((colorkey & 0xf80000) >> 9)
+			 | ((colorkey & 0x00f800) >> 6)
+			 | ((colorkey & 0x0000f8) >> 3);
 		rcar_du_plane_write(rgrp, index, PnTC2R, colorkey);
 		break;
 
 	case DRM_FORMAT_XRGB8888:
 	case DRM_FORMAT_ARGB8888:
 		rcar_du_plane_write(rgrp, index, PnTC3R,
-				    PnTC3R_CODE | (state->colorkey & 0xffffff));
+				    PnTC3R_CODE | colorkey);
 		break;
 	}
 }
@@ -574,6 +578,9 @@ int __rcar_du_plane_atomic_check(struct drm_plane *plane,
 	struct drm_crtc_state *crtc_state;
 	struct drm_rect clip;
 	int ret;
+
+	if (state->colorkey.min != state->colorkey.max)
+		return -EINVAL;
 
 	if (!state->crtc) {
 		/*
@@ -699,7 +706,6 @@ static void rcar_du_plane_reset(struct drm_plane *plane)
 	state->hwindex = -1;
 	state->source = RCAR_DU_PLANE_MEMORY;
 	state->alpha = 255;
-	state->colorkey = RCAR_DU_COLORKEY_NONE;
 	state->state.zpos = plane->type == DRM_PLANE_TYPE_PRIMARY ? 0 : 1;
 
 	plane->state = &state->state;
@@ -714,12 +720,17 @@ static int rcar_du_plane_atomic_set_property(struct drm_plane *plane,
 	struct rcar_du_plane_state *rstate = to_rcar_plane_state(state);
 	struct rcar_du_device *rcdu = to_rcar_plane(plane)->group->dev;
 
-	if (property == rcdu->props.alpha)
+	if (property == rcdu->props.alpha) {
 		rstate->alpha = val;
-	else if (property == rcdu->props.colorkey)
-		rstate->colorkey = val;
-	else
+	} else if (property == rcdu->props.colorkey) {
+		state->colorkey.mode = val & RCAR_DU_COLORKEY_MASK ? 1 : 0;
+		state->colorkey.min = ((val & 0x00ff0000) << 24)
+				    | ((val & 0x0000ff00) << 16)
+				    | ((val & 0x000000ff) << 8);
+		state->colorkey.max = state->colorkey.min;
+	} else {
 		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -732,12 +743,18 @@ static int rcar_du_plane_atomic_get_property(struct drm_plane *plane,
 		container_of(state, const struct rcar_du_plane_state, state);
 	struct rcar_du_device *rcdu = to_rcar_plane(plane)->group->dev;
 
-	if (property == rcdu->props.alpha)
+	if (property == rcdu->props.alpha) {
 		*val = rstate->alpha;
-	else if (property == rcdu->props.colorkey)
-		*val = rstate->colorkey;
-	else
+	} else if (property == rcdu->props.colorkey) {
+		u32 colorkey = ((state->colorkey.min >> 24) & 0x00ff0000)
+			     | ((state->colorkey.min >> 16) & 0x0000ff00)
+			     | ((state->colorkey.min >>  8) & 0x000000ff);
+
+		*val = colorkey | (state->colorkey.mode ?
+			RCAR_DU_COLORKEY_SOURCE : RCAR_DU_COLORKEY_NONE);
+	} else {
 		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -764,6 +781,11 @@ static const uint32_t formats[] = {
 	DRM_FORMAT_NV12,
 	DRM_FORMAT_NV21,
 	DRM_FORMAT_NV16,
+};
+
+static const struct drm_prop_enum_list colorkey_modes[] = {
+	{ 0, "disabled" },
+	{ 1, "source" },
 };
 
 int rcar_du_planes_init(struct rcar_du_group *rgrp)
@@ -808,6 +830,10 @@ int rcar_du_planes_init(struct rcar_du_group *rgrp)
 					   rcdu->props.colorkey,
 					   RCAR_DU_COLORKEY_NONE);
 		drm_plane_create_zpos_property(&plane->plane, 1, 1, 7);
+		drm_plane_create_colorkey_properties(&plane->plane,
+						     colorkey_modes,
+						     ARRAY_SIZE(colorkey_modes),
+						     false);
 	}
 
 	return 0;

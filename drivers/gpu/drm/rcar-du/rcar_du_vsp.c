@@ -68,7 +68,6 @@ void rcar_du_vsp_enable(struct rcar_du_crtc *crtc)
 		.format = rcar_du_format_info(DRM_FORMAT_ARGB8888),
 		.source = RCAR_DU_PLANE_VSPD1,
 		.alpha = 255,
-		.colorkey = 0,
 	};
 
 	if (rcdu->info->gen >= 3)
