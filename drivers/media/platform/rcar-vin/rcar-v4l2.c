@@ -97,6 +97,10 @@ static int rvin_format_align(struct rvin_dev *vin, struct v4l2_pix_format *pix)
 		pix->pixelformat = RVIN_DEFAULT_FORMAT;
 	}
 
+	if (vin->info->model == RCAR_M1 &&
+	    pix->pixelformat == V4L2_PIX_FMT_XBGR32)
+		pix->pixelformat = RVIN_DEFAULT_FORMAT;
+
 	/* Reject ALTERNATE  until support is added to the driver */
 	switch (pix->field) {
 	case V4L2_FIELD_TOP:
@@ -120,12 +124,6 @@ static int rvin_format_align(struct rvin_dev *vin, struct v4l2_pix_format *pix)
 
 	pix->bytesperline = rvin_format_bytesperline(pix);
 	pix->sizeimage = rvin_format_sizeimage(pix);
-
-	if (vin->info->model == RCAR_M1 &&
-	    pix->pixelformat == V4L2_PIX_FMT_XBGR32) {
-		vin_err(vin, "pixel format XBGR32 not supported on M1\n");
-		return -EINVAL;
-	}
 
 	vin_dbg(vin, "Format %ux%u bpl: %d size: %d\n",
 		pix->width, pix->height, pix->bytesperline, pix->sizeimage);
