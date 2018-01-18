@@ -114,7 +114,7 @@ static inline struct nvme_request *nvme_req(struct request *req)
  * NVME_QUIRK_DELAY_BEFORE_CHK_RDY quirk enabled. The value (in ms) was
  * found empirically.
  */
-#define NVME_QUIRK_DELAY_AMOUNT		2000
+#define NVME_QUIRK_DELAY_AMOUNT		2300
 
 enum nvme_ctrl_state {
 	NVME_CTRL_NEW,
@@ -417,6 +417,15 @@ static inline void nvme_mpath_clear_current_path(struct nvme_ns *ns)
 		rcu_assign_pointer(head->current_path, NULL);
 }
 struct nvme_ns *nvme_find_path(struct nvme_ns_head *head);
+
+static inline void nvme_mpath_check_last_path(struct nvme_ns *ns)
+{
+	struct nvme_ns_head *head = ns->head;
+
+	if (head->disk && list_empty(&head->list))
+		kblockd_schedule_work(&head->requeue_work);
+}
+
 #else
 static inline void nvme_failover_req(struct request *req)
 {
@@ -446,6 +455,9 @@ static inline void nvme_mpath_remove_disk_links(struct nvme_ns *ns)
 {
 }
 static inline void nvme_mpath_clear_current_path(struct nvme_ns *ns)
+{
+}
+static inline void nvme_mpath_check_last_path(struct nvme_ns *ns)
 {
 }
 #endif /* CONFIG_NVME_MULTIPATH */

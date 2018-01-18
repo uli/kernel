@@ -448,11 +448,30 @@ static void **nvme_pci_iod_list(struct request *req)
 	return (void **)(iod->sg + blk_rq_nr_phys_segments(req));
 }
 
+static inline bool nvme_pci_use_sgls(struct nvme_dev *dev, struct request *req)
+{
+	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
+	unsigned int avg_seg_size;
+
+	avg_seg_size = DIV_ROUND_UP(blk_rq_payload_bytes(req),
+			blk_rq_nr_phys_segments(req));
+
+	if (!(dev->ctrl.sgls & ((1 << 0) | (1 << 1))))
+		return false;
+	if (!iod->nvmeq->qid)
+		return false;
+	if (!sgl_threshold || avg_seg_size < sgl_threshold)
+		return false;
+	return true;
+}
+
 static blk_status_t nvme_init_iod(struct request *rq, struct nvme_dev *dev)
 {
 	struct nvme_iod *iod = blk_mq_rq_to_pdu(rq);
 	int nseg = blk_rq_nr_phys_segments(rq);
 	unsigned int size = blk_rq_payload_bytes(rq);
+
+	iod->use_sgl = nvme_pci_use_sgls(dev, rq);
 
 	if (nseg > NVME_INT_PAGES || size > NVME_INT_BYTES(dev)) {
 		size_t alloc_size = nvme_pci_iod_alloc_size(dev, size, nseg,
@@ -604,8 +623,6 @@ static blk_status_t nvme_pci_setup_prps(struct nvme_dev *dev,
 	dma_addr_t prp_dma;
 	int nprps, i;
 
-	iod->use_sgl = false;
-
 	length -= (page_size - offset);
 	if (length <= 0) {
 		iod->first_dma = 0;
@@ -715,8 +732,6 @@ static blk_status_t nvme_pci_setup_sgls(struct nvme_dev *dev,
 	int entries = iod->nents, i = 0;
 	dma_addr_t sgl_dma;
 
-	iod->use_sgl = true;
-
 	/* setting the transfer type as SGL */
 	cmd->flags = NVME_CMD_SGL_METABUF;
 
@@ -770,23 +785,6 @@ static blk_status_t nvme_pci_setup_sgls(struct nvme_dev *dev,
 	return BLK_STS_OK;
 }
 
-static inline bool nvme_pci_use_sgls(struct nvme_dev *dev, struct request *req)
-{
-	struct nvme_iod *iod = blk_mq_rq_to_pdu(req);
-	unsigned int avg_seg_size;
-
-	avg_seg_size = DIV_ROUND_UP(blk_rq_payload_bytes(req),
-			blk_rq_nr_phys_segments(req));
-
-	if (!(dev->ctrl.sgls & ((1 << 0) | (1 << 1))))
-		return false;
-	if (!iod->nvmeq->qid)
-		return false;
-	if (!sgl_threshold || avg_seg_size < sgl_threshold)
-		return false;
-	return true;
-}
-
 static blk_status_t nvme_map_data(struct nvme_dev *dev, struct request *req,
 		struct nvme_command *cmnd)
 {
@@ -806,7 +804,7 @@ static blk_status_t nvme_map_data(struct nvme_dev *dev, struct request *req,
 				DMA_ATTR_NO_WARN))
 		goto out;
 
-	if (nvme_pci_use_sgls(dev, req))
+	if (iod->use_sgl)
 		ret = nvme_pci_setup_sgls(dev, req, &cmnd->rw);
 	else
 		ret = nvme_pci_setup_prps(dev, req, &cmnd->rw);
@@ -1759,6 +1757,7 @@ static void nvme_free_host_mem(struct nvme_dev *dev)
 			dev->nr_host_mem_descs * sizeof(*dev->host_mem_descs),
 			dev->host_mem_descs, dev->host_mem_descs_dma);
 	dev->host_mem_descs = NULL;
+	dev->nr_host_mem_descs = 0;
 }
 
 static int __nvme_alloc_host_mem(struct nvme_dev *dev, u64 preferred,
@@ -1787,7 +1786,7 @@ static int __nvme_alloc_host_mem(struct nvme_dev *dev, u64 preferred,
 	if (!bufs)
 		goto out_free_descs;
 
-	for (size = 0; size < preferred; size += len) {
+	for (size = 0; size < preferred && i < max_entries; size += len) {
 		dma_addr_t dma_addr;
 
 		len = min_t(u64, chunk_size, preferred - size);
@@ -2428,7 +2427,7 @@ static int nvme_dev_map(struct nvme_dev *dev)
 	return -ENODEV;
 }
 
-static unsigned long check_dell_samsung_bug(struct pci_dev *pdev)
+static unsigned long check_vendor_combination_bug(struct pci_dev *pdev)
 {
 	if (pdev->vendor == 0x144d && pdev->device == 0xa802) {
 		/*
@@ -2443,6 +2442,14 @@ static unsigned long check_dell_samsung_bug(struct pci_dev *pdev)
 		    (dmi_match(DMI_PRODUCT_NAME, "XPS 15 9550") ||
 		     dmi_match(DMI_PRODUCT_NAME, "Precision 5510")))
 			return NVME_QUIRK_NO_DEEPEST_PS;
+	} else if (pdev->vendor == 0x144d && pdev->device == 0xa804) {
+		/*
+		 * Samsung SSD 960 EVO drops off the PCIe bus after system
+		 * suspend on a Ryzen board, ASUS PRIME B350M-A.
+		 */
+		if (dmi_match(DMI_BOARD_VENDOR, "ASUSTeK COMPUTER INC.") &&
+		    dmi_match(DMI_BOARD_NAME, "PRIME B350M-A"))
+			return NVME_QUIRK_NO_APST;
 	}
 
 	return 0;
@@ -2482,7 +2489,7 @@ static int nvme_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (result)
 		goto unmap;
 
-	quirks |= check_dell_samsung_bug(pdev);
+	quirks |= check_vendor_combination_bug(pdev);
 
 	result = nvme_init_ctrl(&dev->ctrl, &pdev->dev, &nvme_pci_ctrl_ops,
 			quirks);
@@ -2664,6 +2671,8 @@ static const struct pci_device_id nvme_id_table[] = {
 	{ PCI_VDEVICE(INTEL, 0x5845),	/* Qemu emulated controller */
 		.driver_data = NVME_QUIRK_IDENTIFY_CNS, },
 	{ PCI_DEVICE(0x1c58, 0x0003),	/* HGST adapter */
+		.driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
+	{ PCI_DEVICE(0x1c58, 0x0023),	/* WDC SN200 adapter */
 		.driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },
 	{ PCI_DEVICE(0x1c5f, 0x0540),	/* Memblaze Pblaze4 adapter */
 		.driver_data = NVME_QUIRK_DELAY_BEFORE_CHK_RDY, },

@@ -15,9 +15,12 @@
 #ifndef _ASM_RISCV_TLBFLUSH_H
 #define _ASM_RISCV_TLBFLUSH_H
 
-#ifdef CONFIG_MMU
+#include <linux/mm_types.h>
 
-/* Flush entire local TLB */
+/*
+ * Flush entire local TLB.  'sfence.vma' implicitly fences with the instruction
+ * cache as well, so a 'fence.i' is not necessary.
+ */
 static inline void local_flush_tlb_all(void)
 {
 	__asm__ __volatile__ ("sfence.vma" : : : "memory");
@@ -58,7 +61,5 @@ static inline void flush_tlb_kernel_range(unsigned long start,
 {
 	flush_tlb_all();
 }
-
-#endif /* CONFIG_MMU */
 
 #endif /* _ASM_RISCV_TLBFLUSH_H */

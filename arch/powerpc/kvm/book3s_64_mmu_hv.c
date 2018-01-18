@@ -65,11 +65,17 @@ struct kvm_resize_hpt {
 	u32 order;
 
 	/* These fields protected by kvm->lock */
-	int error;
-	bool prepare_done;
 
-	/* Private to the work thread, until prepare_done is true,
-	 * then protected by kvm->resize_hpt_sem */
+	/* Possible values and their usage:
+	 *  <0     an error occurred during allocation,
+	 *  -EBUSY allocation is in the progress,
+	 *  0      allocation made successfuly.
+	 */
+	int error;
+
+	/* Private to the work thread, until error != -EBUSY,
+	 * then protected by kvm->lock.
+	 */
 	struct kvm_hpt_info hpt;
 };
 
@@ -159,8 +165,6 @@ long kvmppc_alloc_reset_hpt(struct kvm *kvm, int order)
 		 * Reset all the reverse-mapping chains for all memslots
 		 */
 		kvmppc_rmap_reset(kvm);
-		/* Ensure that each vcpu will flush its TLB on next entry. */
-		cpumask_setall(&kvm->arch.need_tlb_flush);
 		err = 0;
 		goto out;
 	}
@@ -176,6 +180,10 @@ long kvmppc_alloc_reset_hpt(struct kvm *kvm, int order)
 	kvmppc_set_hpt(kvm, &info);
 
 out:
+	if (err == 0)
+		/* Ensure that each vcpu will flush its TLB on next entry. */
+		cpumask_setall(&kvm->arch.need_tlb_flush);
+
 	mutex_unlock(&kvm->lock);
 	return err;
 }
@@ -1238,8 +1246,9 @@ static unsigned long resize_hpt_rehash_hpte(struct kvm_resize_hpt *resize,
 	unsigned long vpte, rpte, guest_rpte;
 	int ret;
 	struct revmap_entry *rev;
-	unsigned long apsize, psize, avpn, pteg, hash;
+	unsigned long apsize, avpn, pteg, hash;
 	unsigned long new_idx, new_pteg, replace_vpte;
+	int pshift;
 
 	hptep = (__be64 *)(old->virt + (idx << 4));
 
@@ -1298,8 +1307,8 @@ static unsigned long resize_hpt_rehash_hpte(struct kvm_resize_hpt *resize,
 		goto out;
 
 	rpte = be64_to_cpu(hptep[1]);
-	psize = hpte_base_page_size(vpte, rpte);
-	avpn = HPTE_V_AVPN_VAL(vpte) & ~((psize - 1) >> 23);
+	pshift = kvmppc_hpte_base_page_shift(vpte, rpte);
+	avpn = HPTE_V_AVPN_VAL(vpte) & ~(((1ul << pshift) - 1) >> 23);
 	pteg = idx / HPTES_PER_GROUP;
 	if (vpte & HPTE_V_SECONDARY)
 		pteg = ~pteg;
@@ -1311,20 +1320,20 @@ static unsigned long resize_hpt_rehash_hpte(struct kvm_resize_hpt *resize,
 		offset = (avpn & 0x1f) << 23;
 		vsid = avpn >> 5;
 		/* We can find more bits from the pteg value */
-		if (psize < (1ULL << 23))
-			offset |= ((vsid ^ pteg) & old_hash_mask) * psize;
+		if (pshift < 23)
+			offset |= ((vsid ^ pteg) & old_hash_mask) << pshift;
 
-		hash = vsid ^ (offset / psize);
+		hash = vsid ^ (offset >> pshift);
 	} else {
 		unsigned long offset, vsid;
 
 		/* We only have 40 - 23 bits of seg_off in avpn */
 		offset = (avpn & 0x1ffff) << 23;
 		vsid = avpn >> 17;
-		if (psize < (1ULL << 23))
-			offset |= ((vsid ^ (vsid << 25) ^ pteg) & old_hash_mask) * psize;
+		if (pshift < 23)
+			offset |= ((vsid ^ (vsid << 25) ^ pteg) & old_hash_mask) << pshift;
 
-		hash = vsid ^ (vsid << 25) ^ (offset / psize);
+		hash = vsid ^ (vsid << 25) ^ (offset >> pshift);
 	}
 
 	new_pteg = hash & new_hash_mask;
@@ -1412,16 +1421,20 @@ static void resize_hpt_pivot(struct kvm_resize_hpt *resize)
 
 static void resize_hpt_release(struct kvm *kvm, struct kvm_resize_hpt *resize)
 {
-	BUG_ON(kvm->arch.resize_hpt != resize);
+	if (WARN_ON(!mutex_is_locked(&kvm->lock)))
+		return;
 
 	if (!resize)
 		return;
 
-	if (resize->hpt.virt)
-		kvmppc_free_hpt(&resize->hpt);
+	if (resize->error != -EBUSY) {
+		if (resize->hpt.virt)
+			kvmppc_free_hpt(&resize->hpt);
+		kfree(resize);
+	}
 
-	kvm->arch.resize_hpt = NULL;
-	kfree(resize);
+	if (kvm->arch.resize_hpt == resize)
+		kvm->arch.resize_hpt = NULL;
 }
 
 static void resize_hpt_prepare_work(struct work_struct *work)
@@ -1430,17 +1443,41 @@ static void resize_hpt_prepare_work(struct work_struct *work)
 						     struct kvm_resize_hpt,
 						     work);
 	struct kvm *kvm = resize->kvm;
-	int err;
+	int err = 0;
 
-	resize_hpt_debug(resize, "resize_hpt_prepare_work(): order = %d\n",
-			 resize->order);
-
-	err = resize_hpt_allocate(resize);
+	if (WARN_ON(resize->error != -EBUSY))
+		return;
 
 	mutex_lock(&kvm->lock);
 
+	/* Request is still current? */
+	if (kvm->arch.resize_hpt == resize) {
+		/* We may request large allocations here:
+		 * do not sleep with kvm->lock held for a while.
+		 */
+		mutex_unlock(&kvm->lock);
+
+		resize_hpt_debug(resize, "resize_hpt_prepare_work(): order = %d\n",
+				 resize->order);
+
+		err = resize_hpt_allocate(resize);
+
+		/* We have strict assumption about -EBUSY
+		 * when preparing for HPT resize.
+		 */
+		if (WARN_ON(err == -EBUSY))
+			err = -EINPROGRESS;
+
+		mutex_lock(&kvm->lock);
+		/* It is possible that kvm->arch.resize_hpt != resize
+		 * after we grab kvm->lock again.
+		 */
+	}
+
 	resize->error = err;
-	resize->prepare_done = true;
+
+	if (kvm->arch.resize_hpt != resize)
+		resize_hpt_release(kvm, resize);
 
 	mutex_unlock(&kvm->lock);
 }
@@ -1465,14 +1502,12 @@ long kvm_vm_ioctl_resize_hpt_prepare(struct kvm *kvm,
 
 	if (resize) {
 		if (resize->order == shift) {
-			/* Suitable resize in progress */
-			if (resize->prepare_done) {
-				ret = resize->error;
-				if (ret != 0)
-					resize_hpt_release(kvm, resize);
-			} else {
+			/* Suitable resize in progress? */
+			ret = resize->error;
+			if (ret == -EBUSY)
 				ret = 100; /* estimated time in ms */
-			}
+			else if (ret)
+				resize_hpt_release(kvm, resize);
 
 			goto out;
 		}
@@ -1492,6 +1527,8 @@ long kvm_vm_ioctl_resize_hpt_prepare(struct kvm *kvm,
 		ret = -ENOMEM;
 		goto out;
 	}
+
+	resize->error = -EBUSY;
 	resize->order = shift;
 	resize->kvm = kvm;
 	INIT_WORK(&resize->work, resize_hpt_prepare_work);
@@ -1546,16 +1583,12 @@ long kvm_vm_ioctl_resize_hpt_commit(struct kvm *kvm,
 	if (!resize || (resize->order != shift))
 		goto out;
 
-	ret = -EBUSY;
-	if (!resize->prepare_done)
-		goto out;
-
 	ret = resize->error;
-	if (ret != 0)
+	if (ret)
 		goto out;
 
 	ret = resize_hpt_rehash(resize);
-	if (ret != 0)
+	if (ret)
 		goto out;
 
 	resize_hpt_pivot(resize);
@@ -1801,6 +1834,7 @@ static ssize_t kvm_htab_write(struct file *file, const char __user *buf,
 	ssize_t nb;
 	long int err, ret;
 	int mmu_ready;
+	int pshift;
 
 	if (!access_ok(VERIFY_READ, buf, count))
 		return -EFAULT;
@@ -1855,6 +1889,9 @@ static ssize_t kvm_htab_write(struct file *file, const char __user *buf,
 			err = -EINVAL;
 			if (!(v & HPTE_V_VALID))
 				goto out;
+			pshift = kvmppc_hpte_base_page_shift(v, r);
+			if (pshift <= 0)
+				goto out;
 			lbuf += 2;
 			nb += HPTE_SIZE;
 
@@ -1869,14 +1906,18 @@ static ssize_t kvm_htab_write(struct file *file, const char __user *buf,
 				goto out;
 			}
 			if (!mmu_ready && is_vrma_hpte(v)) {
-				unsigned long psize = hpte_base_page_size(v, r);
-				unsigned long senc = slb_pgsize_encoding(psize);
-				unsigned long lpcr;
+				unsigned long senc, lpcr;
 
+				senc = slb_pgsize_encoding(1ul << pshift);
 				kvm->arch.vrma_slb_v = senc | SLB_VSID_B_1T |
 					(VRMA_VSID << SLB_VSID_SHIFT_1T);
-				lpcr = senc << (LPCR_VRMASD_SH - 4);
-				kvmppc_update_lpcr(kvm, lpcr, LPCR_VRMASD);
+				if (!cpu_has_feature(CPU_FTR_ARCH_300)) {
+					lpcr = senc << (LPCR_VRMASD_SH - 4);
+					kvmppc_update_lpcr(kvm, lpcr,
+							   LPCR_VRMASD);
+				} else {
+					kvmppc_setup_partition_table(kvm);
+				}
 				mmu_ready = 1;
 			}
 			++i;
