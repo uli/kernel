@@ -23,6 +23,7 @@
 #include "rcar-vin.h"
 
 #define RVIN_DEFAULT_FORMAT	V4L2_PIX_FMT_YUYV
+#define RVIN_DEFAULT_FIELD	V4L2_FIELD_NONE
 #define RVIN_DEFAULT_COLORSPACE	V4L2_COLORSPACE_SRGB
 
 /* -----------------------------------------------------------------------------
@@ -171,7 +172,7 @@ static int rvin_get_source_format(struct rvin_dev *vin,
 		fmt.format.height *= 2;
 		break;
 	default:
-		vin->format.field = V4L2_FIELD_NONE;
+		vin->format.field = RVIN_DEFAULT_FIELD;
 		break;
 	}
 
@@ -267,9 +268,8 @@ static int __rvin_try_format(struct rvin_dev *vin,
 {
 	int ret;
 
-	/* Keep current field if no specific one is asked for */
 	if (pix->field == V4L2_FIELD_ANY)
-		pix->field = vin->format.field;
+		pix->field = RVIN_DEFAULT_FIELD;
 
 	/* Limit to source capabilities */
 	ret = __rvin_try_format_source(vin, which, pix);
