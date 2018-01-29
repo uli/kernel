@@ -17,6 +17,8 @@
 #ifndef __RCAR_VIN__
 #define __RCAR_VIN__
 
+#include <linux/kref.h>
+
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-dev.h>
@@ -29,10 +31,24 @@
 /* Address alignment mask for HW buffers */
 #define HW_BUFFER_MASK 0x7f
 
-enum chip_id {
+/* Max number on VIN instances that can be in a system */
+#define RCAR_VIN_NUM 8
+
+struct rvin_group;
+
+enum model_id {
 	RCAR_H1,
 	RCAR_M1,
 	RCAR_GEN2,
+	RCAR_GEN3,
+};
+
+enum rvin_csi_id {
+	RVIN_CSI20,
+	RVIN_CSI21,
+	RVIN_CSI40,
+	RVIN_CSI41,
+	RVIN_CSI_MAX,
 };
 
 /**
@@ -49,16 +65,6 @@ enum rvin_dma_state {
 };
 
 /**
- * struct rvin_source_fmt - Source information
- * @width:	Width from source
- * @height:	Height from source
- */
-struct rvin_source_fmt {
-	u32 width;
-	u32 height;
-};
-
-/**
  * struct rvin_video_format - Data format stored in memory
  * @fourcc:	Pixelformat
  * @bpp:	Bytes per pixel
@@ -72,8 +78,6 @@ struct rvin_video_format {
  * struct rvin_graph_entity - Video endpoint from async framework
  * @asd:	sub-device descriptor for async framework
  * @subdev:	subdevice matched using async framework
- * @code:	Media bus format from source
- * @mbus_cfg:	Media bus format from DT
  * @source_pad:	source pad of remote subdevice
  * @sink_pad:	sink pad of remote subdevice
  */
@@ -81,24 +85,62 @@ struct rvin_graph_entity {
 	struct v4l2_async_subdev asd;
 	struct v4l2_subdev *subdev;
 
-	u32 code;
-	struct v4l2_mbus_config mbus_cfg;
-
 	unsigned int source_pad;
 	unsigned int sink_pad;
+};
+
+/** struct rvin_group_route - Map a CSI-2 receiver and channel to a CHSEL
+ * @vin:		Which VIN the CSI-2 and VC describes
+ * @csi:		VIN internal number for CSI-2 device
+ * @chan:		Output channel of the CSI-2 receiver. Each R-Car CSI-2
+ *			receiver has four output channels facing the VIN
+ *			devices, each channel can carry one CSI-2 Virtual
+ *			Channel (VC) and there are no correlation between
+ *			output channel number and CSI-2 VC. It's up to the
+ *			CSI-2 receiver driver to configure which VC is
+ *			outputted on which channel, the VIN devices only
+ *			cares about output channels.
+ * @mask:		Bitmask of chsel values which accommodates route
+ */
+struct rvin_group_route {
+	unsigned int vin;
+	enum rvin_csi_id csi;
+	unsigned char chan;
+	unsigned int mask;
+};
+
+/**
+ * struct rvin_info - Information about the particular VIN implementation
+ * @model:		VIN model
+ * @use_mc:		use media controller instead of controlling subdevice
+ * @max_width:		max input width the VIN supports
+ * @max_height:		max input height the VIN supports
+ * @routes:		routing table VIN <-> CSI-2 for the chsel values
+ */
+struct rvin_info {
+	enum model_id model;
+	bool use_mc;
+
+	unsigned int max_width;
+	unsigned int max_height;
+	const struct rvin_group_route *routes;
 };
 
 /**
  * struct rvin_dev - Renesas VIN device structure
  * @dev:		(OF) device
  * @base:		device I/O register space remapped to virtual memory
- * @chip:		type of VIN chip
+ * @info:		info about VIN instance
  *
  * @vdev:		V4L2 video device associated with VIN
  * @v4l2_dev:		V4L2 device
  * @ctrl_handler:	V4L2 control handler
  * @notifier:		V4L2 asynchronous subdevs notifier
  * @digital:		entity in the DT for local digital subdevice
+ *
+ * @group:		Gen3 CSI group
+ * @id:			Gen3 group id for this VIN
+ * @pad:		media pad for the video device entity
  *
  * @lock:		protects @queue
  * @queue:		vb2 buffers queue
@@ -111,7 +153,8 @@ struct rvin_graph_entity {
  * @sequence:		V4L2 buffers sequence number
  * @state:		keeps track of operation state
  *
- * @source:		active format from the video source
+ * @mbus_cfg:		media bus configuration from DT
+ * @code:		media bus format code
  * @format:		active V4L2 pixel format
  *
  * @crop:		active cropping
@@ -120,13 +163,17 @@ struct rvin_graph_entity {
 struct rvin_dev {
 	struct device *dev;
 	void __iomem *base;
-	enum chip_id chip;
+	const struct rvin_info *info;
 
 	struct video_device vdev;
 	struct v4l2_device v4l2_dev;
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_async_notifier notifier;
 	struct rvin_graph_entity *digital;
+
+	struct rvin_group *group;
+	unsigned char id;
+	struct media_pad pad;
 
 	struct mutex lock;
 	struct vb2_queue queue;
@@ -138,7 +185,8 @@ struct rvin_dev {
 	unsigned int sequence;
 	enum rvin_dma_state state;
 
-	struct rvin_source_fmt source;
+	struct v4l2_mbus_config mbus_cfg;
+	u32 code;
 	struct v4l2_pix_format format;
 
 	struct v4l2_rect crop;
@@ -153,17 +201,47 @@ struct rvin_dev {
 #define vin_warn(d, fmt, arg...)	dev_warn(d->dev, fmt, ##arg)
 #define vin_err(d, fmt, arg...)		dev_err(d->dev, fmt, ##arg)
 
-int rvin_dma_probe(struct rvin_dev *vin, int irq);
-void rvin_dma_remove(struct rvin_dev *vin);
+/**
+ * struct rvin_group - VIN CSI2 group information
+ * @refcount:		number of VIN instances using the group
+ *
+ * @mdev:		media device which represents the group
+ *
+ * @lock:		protects the count, notifier, vin and csi members
+ * @count:		number of enabled VIN instances found in DT
+ * @notifier:		pointer to the notifier of a VIN which handles the
+ *			groups async sub-devices.
+ * @vin:		VIN instances which are part of the group
+ * @csi:		array of pairs of fwnode and subdev pointers
+ *			to all CSI-2 subdevices.
+ */
+struct rvin_group {
+	struct kref refcount;
 
-int rvin_v4l2_probe(struct rvin_dev *vin);
-void rvin_v4l2_remove(struct rvin_dev *vin);
+	struct media_device mdev;
+
+	struct mutex lock;
+	unsigned int count;
+	struct v4l2_async_notifier *notifier;
+	struct rvin_dev *vin[RCAR_VIN_NUM];
+
+	struct {
+		struct fwnode_handle *fwnode;
+		struct v4l2_subdev *subdev;
+	} csi[RVIN_CSI_MAX];
+};
+
+int rvin_dma_register(struct rvin_dev *vin, int irq);
+void rvin_dma_unregister(struct rvin_dev *vin);
+
+int rvin_v4l2_register(struct rvin_dev *vin);
+void rvin_v4l2_unregister(struct rvin_dev *vin);
 
 const struct rvin_video_format *rvin_format_from_pixel(u32 pixelformat);
 
 /* Cropping, composing and scaling */
-void rvin_scale_try(struct rvin_dev *vin, struct v4l2_pix_format *pix,
-		    u32 width, u32 height);
 void rvin_crop_scale_comp(struct rvin_dev *vin);
+
+void rvin_set_channel_routing(struct rvin_dev *vin, u8 chsel);
 
 #endif
