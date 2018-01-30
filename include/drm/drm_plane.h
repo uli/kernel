@@ -52,6 +52,13 @@ struct drm_modeset_acquire_ctx;
  *	where N is the number of active planes for given crtc. Note that
  *	the driver must call drm_atomic_normalize_zpos() to update this before
  *	it can be trusted.
+ * @colorkey.mode: color key mode. 0 disabled color keying, other values are
+ *	driver-specific.
+ * @colorkey.min: color key range minimum. The value is stored in AXYZ16161616
+ *	format, where A is the alpha value and X, Y and Z correspond to the
+ *	color components of the plane's pixel format (usually RGB or YUV).
+ * @colorkey.max: color key range maximum (in AXYZ16161616 format)
+ * @colorkey.value: color key replacement value (in in AXYZ16161616 format)
  * @src: clipped source coordinates of the plane (in 16.16)
  * @dst: clipped destination coordinates of the plane
  * @state: backpointer to global drm_atomic_state
@@ -111,6 +118,14 @@ struct drm_plane_state {
 	/* Plane zpos */
 	unsigned int zpos;
 	unsigned int normalized_zpos;
+
+	/* Plane colorkey */
+	struct {
+		unsigned int mode;
+		u64 min;
+		u64 max;
+		u64 value;
+	} colorkey;
 
 	/* Clipped coordinates */
 	struct drm_rect src, dst;
@@ -481,9 +496,13 @@ enum drm_plane_type {
  * @funcs: helper functions
  * @properties: property tracking for this plane
  * @type: type of plane (overlay, primary, cursor)
+ * @helper_private: mid-layer private data
  * @zpos_property: zpos property for this plane
  * @rotation_property: rotation property for this plane
- * @helper_private: mid-layer private data
+ * @colorkey.mode_property: color key mode property
+ * @colorkey.min_property: color key range minimum property
+ * @colorkey.max_property: color key range maximum property
+ * @colorkey.value_property: color key replacement value property
  */
 struct drm_plane {
 	struct drm_device *dev;
@@ -558,6 +577,13 @@ struct drm_plane {
 
 	struct drm_property *zpos_property;
 	struct drm_property *rotation_property;
+
+	struct {
+		struct drm_property *mode_property;
+		struct drm_property *min_property;
+		struct drm_property *max_property;
+		struct drm_property *value_property;
+	} colorkey;
 };
 
 #define obj_to_plane(x) container_of(x, struct drm_plane, base)

@@ -70,7 +70,6 @@ void rcar_du_vsp_enable(struct rcar_du_crtc *crtc)
 		.format = rcar_du_format_info(DRM_FORMAT_ARGB8888),
 		.source = RCAR_DU_PLANE_VSPD1,
 		.alpha = 255,
-		.colorkey = 0,
 	};
 
 	if (rcdu->info->gen >= 3)
@@ -207,6 +206,13 @@ static void rcar_du_vsp_plane_setup(struct rcar_du_vsp_plane *plane)
 			break;
 		}
 	}
+
+	/* Convert the colorkey from 16 bits to 8 bits per component. */
+	cfg.colorkey.enabled = state->state.colorkey.mode;
+	cfg.colorkey.alpha = state->state.colorkey.value >> 56;
+	cfg.colorkey.key = ((state->state.colorkey.min >> 24) & 0x00ff0000)
+			 | ((state->state.colorkey.min >> 16) & 0x0000ff00)
+			 | ((state->state.colorkey.min >>  8) & 0x000000ff);
 
 	vsp1_du_atomic_update(plane->vsp->vsp, crtc->vsp_pipe,
 			      plane->index, &cfg);
@@ -393,6 +399,11 @@ static const struct drm_plane_funcs rcar_du_vsp_plane_funcs = {
 	.atomic_get_property = rcar_du_vsp_plane_atomic_get_property,
 };
 
+static const struct drm_prop_enum_list colorkey_modes[] = {
+	{ 0, "disabled" },
+	{ 1, "source" },
+};
+
 int rcar_du_vsp_init(struct rcar_du_vsp *vsp, struct device_node *np,
 		     unsigned int crtcs)
 {
@@ -451,6 +462,10 @@ int rcar_du_vsp_init(struct rcar_du_vsp *vsp, struct device_node *np,
 					   rcdu->props.alpha, 255);
 		drm_plane_create_zpos_property(&plane->plane, 1, 1,
 					       vsp->num_planes - 1);
+		drm_plane_create_colorkey_properties(&plane->plane,
+						     colorkey_modes,
+						     ARRAY_SIZE(colorkey_modes),
+						     true);
 	}
 
 	return 0;

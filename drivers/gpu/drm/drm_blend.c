@@ -98,6 +98,10 @@
  *   planes. Without this property the primary plane is always below the cursor
  *   plane, and ordering between all other planes is undefined.
  *
+ * - Color keying is set up with drm_plane_create_colorkey_properties(). It adds
+ *   support for replacing a range of colors with a transparent color in the
+ *   plane.
+ *
  * Note that all the property extensions described here apply either to the
  * plane or the CRTC (e.g. for the background color, which currently is not
  * exposed and assumed to be black).
@@ -407,3 +411,107 @@ int drm_atomic_normalize_zpos(struct drm_device *dev,
 	return 0;
 }
 EXPORT_SYMBOL(drm_atomic_normalize_zpos);
+
+/**
+ * drm_plane_create_colorkey_properties - create colorkey properties
+ * @plane: drm plane
+ * @modes: array of supported color keying modes
+ * @num_modes: number of modes in the modes array
+ * @replace: if true create the colorkey.replacement property
+ *
+ * This function creates the generic color keying properties and attach them to
+ * the plane to enable color keying control for blending operations.
+ *
+ * Color keying is controlled through four properties:
+ *
+ * colorkey.mode:
+ *	The mode is an enumerated property that controls how color keying
+ *	operates. Modes are driver-specific, except for a "disabled" mode that
+ *	disables color keying and is guaranteed to exist if color keying is
+ *	supported.
+ *
+ * colorkey.min, colorkey.max:
+ *	Those two properties specify the colors that are replaced by transparent
+ *	pixels. Pixel whose values are in the [min, max] range are replaced, all
+ *	other pixels are left untouched. The minimum and maximum values are
+ *	expressed as a 64-bit integer in AXYZ16161616 format, where A is the
+ *	alpha value and X, Y and Z correspond to the color components of the
+ *	plane's pixel format. In most cases XYZ will be either RGB or YUV.
+ *
+ *	When a single color key is supported instead of a range, userspace shall
+ *	set the min and max properties to the same value, and drivers return an
+ *	error from their plane atomic check when the min and max values differ.
+ *
+ *	Note that depending on the selected mode, not all components might be
+ *	used for comparison. For instance a device could support color keying in
+ *	YUV format using luma (Y) matching only, ignoring the chroma components.
+ *	This behaviour is driver-specific.
+ *
+ * colorkey.value:
+ *	This property specifies the color value that replaces pixels matching
+ *	the [min, max] range. The value is expressed in AXYZ16161616 format as
+ *	the min and max properties.
+ *
+ *	This property is optional and only present when the device supports
+ *	configurable color replacement for matching pixels in the plane. If
+ *	color keying capabilities of the device are limited to making the
+ *	matching pixels fully transparent the colorkey.value property won't be
+ *	created.
+ *
+ *	Note that depending on the device, or the selected mode, not all
+ *	components might be used for value replacement. For instance a device
+ *	could support replacing the alpha value of the matching pixels but not
+ *	its color components. This behaviour is driver-specific.
+ *
+ * The @modes parameter points to an array of all color keying modes supported
+ * by the plane. The first mode has to be named "disabled" and have value 0. All
+ * other modes are driver-specific, and at least one mode has to be provided in
+ * addition to the "disabled" mode.
+ *
+ * Returns:
+ * Zero on success, negative errno on failure.
+ */
+int drm_plane_create_colorkey_properties(struct drm_plane *plane,
+					 const struct drm_prop_enum_list *modes,
+					 unsigned int num_modes, bool replace)
+{
+#define CREATE_COLORKEY_PROP(plane, name, type, args...) ({		       \
+	prop = drm_property_create_##type(plane->dev, 0, "colorkey." #name,    \
+					  args);			       \
+	if (prop) {							       \
+		drm_object_attach_property(&plane->base, prop, 0);	       \
+		plane->colorkey.name##_property = prop;			       \
+	}								       \
+	prop;								       \
+})
+
+	struct drm_property *prop;
+
+	/*
+	 * A minimum of two modes are required, with the first mode must named
+	 * "disabled".
+	 */
+	if (!modes || num_modes == 0 || strcmp(modes[0].name, "disabled"))
+		return -EINVAL;
+
+	prop = CREATE_COLORKEY_PROP(plane, mode, enum, modes, num_modes);
+	if (!prop)
+		return -ENOMEM;
+
+	prop = CREATE_COLORKEY_PROP(plane, min, range, 0, U64_MAX);
+	if (!prop)
+		return -ENOMEM;
+
+	prop = CREATE_COLORKEY_PROP(plane, max, range, 0, U64_MAX);
+	if (!prop)
+		return -ENOMEM;
+
+	if (replace) {
+		prop = CREATE_COLORKEY_PROP(plane, value, range, 0, U64_MAX);
+		if (!prop)
+			return -ENOMEM;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_plane_create_colorkey_properties);

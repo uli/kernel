@@ -385,6 +385,9 @@ int vsp1_du_atomic_update(struct device *dev, unsigned int pipe_index,
 	rpf->format.plane_fmt[0].bytesperline = cfg->pitch;
 	rpf->format.plane_fmt[1].bytesperline = cfg->pitch;
 	rpf->alpha = cfg->alpha;
+	rpf->colorkey.enabled = cfg->colorkey.enabled;
+	rpf->colorkey.key = cfg->colorkey.key;
+	rpf->colorkey.alpha = cfg->colorkey.alpha;
 
 	rpf->mem.addr[0] = cfg->mem[0];
 	rpf->mem.addr[1] = cfg->mem[1];

@@ -759,6 +759,14 @@ static int drm_atomic_plane_set_property(struct drm_plane *plane,
 		state->rotation = val;
 	} else if (property == plane->zpos_property) {
 		state->zpos = val;
+	} else if (property == plane->colorkey.mode_property) {
+		state->colorkey.mode = val;
+	} else if (property == plane->colorkey.min_property) {
+		state->colorkey.min = val;
+	} else if (property == plane->colorkey.max_property) {
+		state->colorkey.max = val;
+	} else if (property == plane->colorkey.value_property) {
+		state->colorkey.value = val;
 	} else if (plane->funcs->atomic_set_property) {
 		return plane->funcs->atomic_set_property(plane, state,
 				property, val);
@@ -818,6 +826,14 @@ drm_atomic_plane_get_property(struct drm_plane *plane,
 		*val = state->rotation;
 	} else if (property == plane->zpos_property) {
 		*val = state->zpos;
+	} else if (property == plane->colorkey.mode_property) {
+		*val = state->colorkey.mode;
+	} else if (property == plane->colorkey.min_property) {
+		*val = state->colorkey.min;
+	} else if (property == plane->colorkey.max_property) {
+		*val = state->colorkey.max;
+	} else if (property == plane->colorkey.value_property) {
+		*val = state->colorkey.value;
 	} else if (plane->funcs->atomic_get_property) {
 		return plane->funcs->atomic_get_property(plane, state, property, val);
 	} else {

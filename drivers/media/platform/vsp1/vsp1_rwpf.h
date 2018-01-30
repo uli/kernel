@@ -50,6 +50,11 @@ struct vsp1_rwpf {
 	unsigned int bru_input;
 
 	unsigned int alpha;
+	struct {
+		bool enabled;
+		u32 key;
+		u32 alpha;
+	} colorkey;
 
 	u32 mult_alpha;
 	u32 outfmt;
