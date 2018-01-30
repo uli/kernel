@@ -333,6 +333,7 @@ regulator_get_suspend_state(struct regulator_dev *rdev, suspend_state_t state)
 		return NULL;
 
 	switch (state) {
+	case PM_SUSPEND_TO_IDLE:
 	case PM_SUSPEND_STANDBY:
 		return &rdev->constraints->state_standby;
 	case PM_SUSPEND_MEM:
