@@ -14,6 +14,8 @@
  * the Free Software Foundation.
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/err.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -32,10 +34,10 @@
 static int debug;
 module_param(debug, int, 0644);
 
-#define dprintk(level, fmt, arg...)					      \
-	do {								      \
-		if (debug >= level)					      \
-			pr_info("vb2-core: %s: " fmt, __func__, ## arg); \
+#define dprintk(level, fmt, arg...)				\
+	do {							\
+		if (debug >= level)				\
+			pr_info("%s: " fmt, __func__, ## arg);	\
 	} while (0)
 
 #ifdef CONFIG_VIDEO_ADV_DEBUG
@@ -332,6 +334,10 @@ static int __vb2_queue_alloc(struct vb2_queue *q, enum vb2_memory memory,
 	struct vb2_buffer *vb;
 	int ret;
 
+	/* Ensure that q->num_buffers+num_buffers is below VB2_MAX_FRAME */
+	num_buffers = min_t(unsigned int, num_buffers,
+			    VB2_MAX_FRAME - q->num_buffers);
+
 	for (buffer = 0; buffer < num_buffers; ++buffer) {
 		/* Allocate videobuf buffer structures */
 		vb = kzalloc(q->buf_struct_size, GFP_KERNEL);
@@ -460,12 +466,12 @@ static int __vb2_queue_free(struct vb2_queue *q, unsigned int buffers)
 				  q->cnt_wait_prepare != q->cnt_wait_finish;
 
 		if (unbalanced || debug) {
-			pr_info("vb2: counters for queue %p:%s\n", q,
+			pr_info("counters for queue %p:%s\n", q,
 				unbalanced ? " UNBALANCED!" : "");
-			pr_info("vb2:     setup: %u start_streaming: %u stop_streaming: %u\n",
+			pr_info("     setup: %u start_streaming: %u stop_streaming: %u\n",
 				q->cnt_queue_setup, q->cnt_start_streaming,
 				q->cnt_stop_streaming);
-			pr_info("vb2:     wait_prepare: %u wait_finish: %u\n",
+			pr_info("     wait_prepare: %u wait_finish: %u\n",
 				q->cnt_wait_prepare, q->cnt_wait_finish);
 		}
 		q->cnt_queue_setup = 0;
@@ -486,23 +492,23 @@ static int __vb2_queue_free(struct vb2_queue *q, unsigned int buffers)
 				  vb->cnt_buf_init != vb->cnt_buf_cleanup;
 
 		if (unbalanced || debug) {
-			pr_info("vb2:   counters for queue %p, buffer %d:%s\n",
+			pr_info("   counters for queue %p, buffer %d:%s\n",
 				q, buffer, unbalanced ? " UNBALANCED!" : "");
-			pr_info("vb2:     buf_init: %u buf_cleanup: %u buf_prepare: %u buf_finish: %u\n",
+			pr_info("     buf_init: %u buf_cleanup: %u buf_prepare: %u buf_finish: %u\n",
 				vb->cnt_buf_init, vb->cnt_buf_cleanup,
 				vb->cnt_buf_prepare, vb->cnt_buf_finish);
-			pr_info("vb2:     buf_queue: %u buf_done: %u\n",
+			pr_info("     buf_queue: %u buf_done: %u\n",
 				vb->cnt_buf_queue, vb->cnt_buf_done);
-			pr_info("vb2:     alloc: %u put: %u prepare: %u finish: %u mmap: %u\n",
+			pr_info("     alloc: %u put: %u prepare: %u finish: %u mmap: %u\n",
 				vb->cnt_mem_alloc, vb->cnt_mem_put,
 				vb->cnt_mem_prepare, vb->cnt_mem_finish,
 				vb->cnt_mem_mmap);
-			pr_info("vb2:     get_userptr: %u put_userptr: %u\n",
+			pr_info("     get_userptr: %u put_userptr: %u\n",
 				vb->cnt_mem_get_userptr, vb->cnt_mem_put_userptr);
-			pr_info("vb2:     attach_dmabuf: %u detach_dmabuf: %u map_dmabuf: %u unmap_dmabuf: %u\n",
+			pr_info("     attach_dmabuf: %u detach_dmabuf: %u map_dmabuf: %u unmap_dmabuf: %u\n",
 				vb->cnt_mem_attach_dmabuf, vb->cnt_mem_detach_dmabuf,
 				vb->cnt_mem_map_dmabuf, vb->cnt_mem_unmap_dmabuf);
-			pr_info("vb2:     get_dmabuf: %u num_users: %u vaddr: %u cookie: %u\n",
+			pr_info("     get_dmabuf: %u num_users: %u vaddr: %u cookie: %u\n",
 				vb->cnt_mem_get_dmabuf,
 				vb->cnt_mem_num_users,
 				vb->cnt_mem_vaddr,
@@ -520,7 +526,7 @@ static int __vb2_queue_free(struct vb2_queue *q, unsigned int buffers)
 
 	q->num_buffers -= buffers;
 	if (!q->num_buffers) {
-		q->memory = 0;
+		q->memory = VB2_MEMORY_UNKNOWN;
 		INIT_LIST_HEAD(&q->queued_list);
 	}
 	return 0;
@@ -662,7 +668,8 @@ int vb2_core_reqbufs(struct vb2_queue *q, enum vb2_memory memory,
 		return -EBUSY;
 	}
 
-	if (*count == 0 || q->num_buffers != 0 || q->memory != memory) {
+	if (*count == 0 || q->num_buffers != 0 ||
+	    (q->memory != VB2_MEMORY_UNKNOWN && q->memory != memory)) {
 		/*
 		 * We already have buffers allocated, so first check if they
 		 * are not in use and can be freed.
@@ -696,8 +703,9 @@ int vb2_core_reqbufs(struct vb2_queue *q, enum vb2_memory memory,
 	/*
 	 * Make sure the requested values and current defaults are sane.
 	 */
-	num_buffers = min_t(unsigned int, *count, VB2_MAX_FRAME);
-	num_buffers = max_t(unsigned int, num_buffers, q->min_buffers_needed);
+	WARN_ON(q->min_buffers_needed > VB2_MAX_FRAME);
+	num_buffers = max_t(unsigned int, *count, q->min_buffers_needed);
+	num_buffers = min_t(unsigned int, num_buffers, VB2_MAX_FRAME);
 	memset(q->alloc_devs, 0, sizeof(q->alloc_devs));
 	q->memory = memory;
 
@@ -1650,8 +1658,11 @@ static void __vb2_queue_cancel(struct vb2_queue *q)
 	 */
 	if (WARN_ON(atomic_read(&q->owned_by_drv_count))) {
 		for (i = 0; i < q->num_buffers; ++i)
-			if (q->bufs[i]->state == VB2_BUF_STATE_ACTIVE)
+			if (q->bufs[i]->state == VB2_BUF_STATE_ACTIVE) {
+				pr_warn("driver bug: stop_streaming operation is leaving buf %p in active state\n",
+					q->bufs[i]);
 				vb2_buffer_done(q->bufs[i], VB2_BUF_STATE_ERROR);
+			}
 		/* Must be zero now */
 		WARN_ON(atomic_read(&q->owned_by_drv_count));
 	}
@@ -1993,6 +2004,8 @@ int vb2_core_queue_init(struct vb2_queue *q)
 	spin_lock_init(&q->done_lock);
 	mutex_init(&q->mmap_lock);
 	init_waitqueue_head(&q->done_wq);
+
+	q->memory = VB2_MEMORY_UNKNOWN;
 
 	if (q->buf_struct_size == 0)
 		q->buf_struct_size = sizeof(struct vb2_buffer);
@@ -2522,7 +2535,7 @@ static int vb2_thread(void *data)
 				break;
 		call_void_qop(q, wait_finish, q);
 		if (copy_timestamp)
-			vb->timestamp = ktime_get_ns();;
+			vb->timestamp = ktime_get_ns();
 		if (!threadio->stop)
 			ret = vb2_core_qbuf(q, vb->index, NULL);
 		call_void_qop(q, wait_prepare, q);

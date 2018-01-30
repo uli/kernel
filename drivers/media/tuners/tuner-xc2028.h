@@ -8,7 +8,7 @@
 #ifndef __TUNER_XC2028_H__
 #define __TUNER_XC2028_H__
 
-#include "dvb_frontend.h"
+#include <media/dvb_frontend.h>
 
 #define XC2028_DEFAULT_FIRMWARE "xc3028-v27.fw"
 #define XC3028L_DEFAULT_FIRMWARE "xc3028L-v36.fw"
@@ -48,7 +48,7 @@ struct xc2028_ctrl {
 
 struct xc2028_config {
 	struct i2c_adapter *i2c_adap;
-	u8 		   i2c_addr;
+	u8		   i2c_addr;
 	struct xc2028_ctrl *ctrl;
 };
 

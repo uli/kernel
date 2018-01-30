@@ -1032,7 +1032,7 @@ static int tuner_attach_tda18212(struct ddb_input *input, u32 porttype)
 
 	return 0;
 err:
-	dev_notice(dev, "TDA18212 tuner not found. Device is not fully operational.\n");
+	dev_err(dev, "TDA18212 tuner not found. Device is not fully operational.\n");
 	return -ENODEV;
 }
 
@@ -1114,6 +1114,7 @@ static int demod_attach_stv0900(struct ddb_input *input, int type)
 			0, (input->nr & 1) ?
 			(0x09 - type) : (0x0b - type))) {
 		dev_err(dev, "No LNBH24 found!\n");
+		dvb_frontend_detach(dvb->fe);
 		return -ENODEV;
 	}
 	return 0;
@@ -1196,6 +1197,7 @@ static int demod_attach_stv0910(struct ddb_input *input, int type)
 		lnbcfg.i2c_address = (((input->nr & 1) ? 0x09 : 0x08) << 1);
 		if (!dvb_attach(lnbh25_attach, dvb->fe, &lnbcfg, i2c)) {
 			dev_err(dev, "No LNBH25 found!\n");
+			dvb_frontend_detach(dvb->fe);
 			return -ENODEV;
 		}
 	}
@@ -1261,6 +1263,14 @@ static void dvb_input_detach(struct ddb_input *input)
 			dvb_unregister_frontend(dvb->fe);
 		/* fallthrough */
 	case 0x30:
+		client = dvb->i2c_client[0];
+		if (client) {
+			module_put(client->dev.driver->owner);
+			i2c_unregister_device(client);
+			dvb->i2c_client[0] = NULL;
+			client = NULL;
+		}
+
 		if (dvb->fe2)
 			dvb_frontend_detach(dvb->fe2);
 		if (dvb->fe)
@@ -1269,12 +1279,6 @@ static void dvb_input_detach(struct ddb_input *input)
 		dvb->fe2 = NULL;
 		/* fallthrough */
 	case 0x20:
-		client = dvb->i2c_client[0];
-		if (client) {
-			module_put(client->dev.driver->owner);
-			i2c_unregister_device(client);
-		}
-
 		dvb_net_release(&dvb->dvbnet);
 		/* fallthrough */
 	case 0x12:
@@ -1421,7 +1425,7 @@ static int dvb_input_attach(struct ddb_input *input)
 	dvb->dmxdev.demux = &dvbdemux->dmx;
 	ret = dvb_dmxdev_init(&dvb->dmxdev, adap);
 	if (ret < 0)
-		return ret;
+		goto err_detach;
 	dvb->attached = 0x11;
 
 	dvb->mem_frontend.source = DMX_MEMORY_FE;
@@ -1430,12 +1434,12 @@ static int dvb_input_attach(struct ddb_input *input)
 	dvb->demux.dmx.add_frontend(&dvb->demux.dmx, &dvb->hw_frontend);
 	ret = dvbdemux->dmx.connect_frontend(&dvbdemux->dmx, &dvb->hw_frontend);
 	if (ret < 0)
-		return ret;
+		goto err_detach;
 	dvb->attached = 0x12;
 
 	ret = dvb_net_init(adap, &dvb->dvbnet, dvb->dmxdev.demux);
 	if (ret < 0)
-		return ret;
+		goto err_detach;
 	dvb->attached = 0x20;
 
 	dvb->fe = NULL;
@@ -1443,47 +1447,47 @@ static int dvb_input_attach(struct ddb_input *input)
 	switch (port->type) {
 	case DDB_TUNER_MXL5XX:
 		if (ddb_fe_attach_mxl5xx(input) < 0)
-			return -ENODEV;
+			goto err_detach;
 		break;
 	case DDB_TUNER_DVBS_ST:
 		if (demod_attach_stv0900(input, 0) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_stv6110(input, 0) < 0)
 			goto err_tuner;
 		break;
 	case DDB_TUNER_DVBS_ST_AA:
 		if (demod_attach_stv0900(input, 1) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_stv6110(input, 1) < 0)
 			goto err_tuner;
 		break;
 	case DDB_TUNER_DVBS_STV0910:
 		if (demod_attach_stv0910(input, 0) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_stv6111(input, 0) < 0)
 			goto err_tuner;
 		break;
 	case DDB_TUNER_DVBS_STV0910_PR:
 		if (demod_attach_stv0910(input, 1) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_stv6111(input, 1) < 0)
 			goto err_tuner;
 		break;
 	case DDB_TUNER_DVBS_STV0910_P:
 		if (demod_attach_stv0910(input, 0) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_stv6111(input, 1) < 0)
 			goto err_tuner;
 		break;
 	case DDB_TUNER_DVBCT_TR:
 		if (demod_attach_drxk(input) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_tda18271(input) < 0)
 			goto err_tuner;
 		break;
 	case DDB_TUNER_DVBCT_ST:
 		if (demod_attach_stv0367(input) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_tda18212(input, port->type) < 0)
 			goto err_tuner;
 		break;
@@ -1503,7 +1507,7 @@ static int dvb_input_attach(struct ddb_input *input)
 		else
 			par = 1;
 		if (demod_attach_cxd28xx(input, par, osc24) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_tda18212(input, port->type) < 0)
 			goto err_tuner;
 		break;
@@ -1514,7 +1518,7 @@ static int dvb_input_attach(struct ddb_input *input)
 	case DDB_TUNER_DVBC2T2_SONY:
 	case DDB_TUNER_ISDBT_SONY:
 		if (demod_attach_cxd28xx(input, 0, osc24) < 0)
-			return -ENODEV;
+			goto err_detach;
 		if (tuner_attach_tda18212(input, port->type) < 0)
 			goto err_tuner;
 		break;
@@ -1525,11 +1529,13 @@ static int dvb_input_attach(struct ddb_input *input)
 
 	if (dvb->fe) {
 		if (dvb_register_frontend(adap, dvb->fe) < 0)
-			return -ENODEV;
+			goto err_detach;
 
 		if (dvb->fe2) {
-			if (dvb_register_frontend(adap, dvb->fe2) < 0)
-				return -ENODEV;
+			if (dvb_register_frontend(adap, dvb->fe2) < 0) {
+				dvb_unregister_frontend(dvb->fe);
+				goto err_detach;
+			}
 			dvb->fe2->tuner_priv = dvb->fe->tuner_priv;
 			memcpy(&dvb->fe2->ops.tuner_ops,
 			       &dvb->fe->ops.tuner_ops,
@@ -1541,12 +1547,18 @@ static int dvb_input_attach(struct ddb_input *input)
 	return 0;
 
 err_tuner:
-	dev_warn(port->dev->dev, "tuner attach failed!\n");
+	dev_err(port->dev->dev, "tuner attach failed!\n");
 
 	if (dvb->fe2)
 		dvb_frontend_detach(dvb->fe2);
 	if (dvb->fe)
 		dvb_frontend_detach(dvb->fe);
+err_detach:
+	dvb_input_detach(input);
+
+	/* return error from ret if set */
+	if (ret < 0)
+		return ret;
 
 	return -ENODEV;
 }
@@ -1923,8 +1935,10 @@ static int ddb_port_attach(struct ddb_port *port)
 		if (ret < 0)
 			break;
 		ret = dvb_input_attach(port->input[1]);
-		if (ret < 0)
+		if (ret < 0) {
+			dvb_input_detach(port->input[0]);
 			break;
+		}
 		port->input[0]->redi = port->input[0];
 		port->input[1]->redi = port->input[1];
 		break;
@@ -1950,7 +1964,7 @@ static int ddb_port_attach(struct ddb_port *port)
 
 int ddb_ports_attach(struct ddb *dev)
 {
-	int i, ret = 0;
+	int i, numports, err_ports = 0, ret = 0;
 	struct ddb_port *port;
 
 	if (dev->port_num) {
@@ -1960,11 +1974,31 @@ int ddb_ports_attach(struct ddb *dev)
 			return ret;
 		}
 	}
+
+	numports = dev->port_num;
+
 	for (i = 0; i < dev->port_num; i++) {
 		port = &dev->port[i];
-		ret = ddb_port_attach(port);
+		if (port->class != DDB_PORT_NONE) {
+			ret = ddb_port_attach(port);
+			if (ret)
+				err_ports++;
+		} else {
+			numports--;
+		}
 	}
-	return ret;
+
+	if (err_ports) {
+		if (err_ports == numports) {
+			dev_err(dev->dev, "All connected ports failed to initialise!\n");
+			return -ENODEV;
+		}
+
+		dev_warn(dev->dev, "%d of %d connected ports failed to initialise!\n",
+			 err_ports, numports);
+	}
+
+	return 0;
 }
 
 void ddb_ports_detach(struct ddb *dev)
@@ -1977,18 +2011,12 @@ void ddb_ports_detach(struct ddb *dev)
 
 		switch (port->class) {
 		case DDB_PORT_TUNER:
-			dvb_input_detach(port->input[0]);
 			dvb_input_detach(port->input[1]);
+			dvb_input_detach(port->input[0]);
 			break;
 		case DDB_PORT_CI:
 		case DDB_PORT_LOOP:
-			if (port->dvb[0].dev)
-				dvb_unregister_device(port->dvb[0].dev);
-			if (port->en) {
-				dvb_ca_en50221_release(port->en);
-				kfree(port->en);
-				port->en = NULL;
-			}
+			ddb_ci_detach(port);
 			break;
 		}
 	}
@@ -3267,7 +3295,7 @@ int ddb_init(struct ddb *dev)
 	ddb_init_boards(dev);
 
 	if (ddb_i2c_init(dev) < 0)
-		goto fail;
+		goto fail1;
 	ddb_ports_init(dev);
 	if (ddb_buffers_alloc(dev) < 0) {
 		dev_info(dev->dev, "Could not allocate buffer memory\n");
@@ -3285,14 +3313,14 @@ int ddb_init(struct ddb *dev)
 	return 0;
 
 fail3:
-	ddb_ports_detach(dev);
 	dev_err(dev->dev, "fail3\n");
-	ddb_ports_release(dev);
+	ddb_ports_detach(dev);
+	ddb_buffers_free(dev);
 fail2:
 	dev_err(dev->dev, "fail2\n");
-	ddb_buffers_free(dev);
+	ddb_ports_release(dev);
 	ddb_i2c_release(dev);
-fail:
+fail1:
 	dev_err(dev->dev, "fail1\n");
 	return -1;
 }

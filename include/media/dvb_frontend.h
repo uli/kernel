@@ -44,7 +44,7 @@
 
 #include <linux/dvb/frontend.h>
 
-#include "dvbdev.h"
+#include <media/dvbdev.h>
 
 /*
  * Maximum number of Delivery systems per frontend. It
@@ -99,10 +99,10 @@ struct dvb_tuner_info {
  * struct analog_parameters - Parameters to tune into an analog/radio channel
  *
  * @frequency:	Frequency used by analog TV tuner (either in 62.5 kHz step,
- * 		for TV, or 62.5 Hz for radio)
+ *		for TV, or 62.5 Hz for radio)
  * @mode:	Tuner mode, as defined on enum v4l2_tuner_type
  * @audmode:	Audio mode as defined for the rxsubchans field at videodev2.h,
- * 		e. g. V4L2_TUNER_MODE_*
+ *		e. g. V4L2_TUNER_MODE_*
  * @std:	TV standard bitmap as defined at videodev2.h, e. g. V4L2_STD_*
  *
  * Hybrid tuners should be supported by both V4L2 and DVB APIs. This
@@ -205,7 +205,7 @@ enum dvbfe_search {
  * @get_frequency:	get the actual tuned frequency
  * @get_bandwidth:	get the bandwitdh used by the low pass filters
  * @get_if_frequency:	get the Intermediate Frequency, in Hz. For baseband,
- * 			should return 0.
+ *			should return 0.
  * @get_status:		returns the frontend lock status
  * @get_rf_strength:	returns the RF signal strength. Used mostly to support
  *			analog TV and radio. Digital TV should report, instead,
@@ -364,7 +364,7 @@ struct dtv_frontend_properties;
  *			implementing this callback only if DVBv3 API
  *			compatibility is wanted.
  * @read_snr:		legacy callback function to return the Signal/Noise
- * 			rate. Newer drivers should provide such info via
+ *			rate. Newer drivers should provide such info via
  *			DVBv5 API, e. g. @set_frontend/@get_frontend,
  *			implementing this callback only if DVBv3 API
  *			compatibility is wanted.
@@ -490,7 +490,7 @@ struct dvb_fe_events {
  * @fec_inner:		Forward error correction inner Code Rate
  * @transmission_mode:	Transmission Mode
  * @bandwidth_hz:	Bandwidth, in Hz. A zero value means that userspace
- * 			wants to autodetect.
+ *			wants to autodetect.
  * @guard_interval:	Guard Interval
  * @hierarchy:		Hierarchy
  * @symbol_rate:	Symbol Rate
@@ -513,6 +513,8 @@ struct dvb_fe_events {
  * @layer.interleaving:	 per layer interleaving.
  * @stream_id:		If different than zero, enable substream filtering, if
  *			hardware supports (DVB-S2 and DVB-T2).
+ * @scrambling_sequence_index:	Carries the index of the DVB-S2 physical layer
+ *				scrambling sequence.
  * @atscmh_fic_ver:	Version number of the FIC (Fast Information Channel)
  *			signaling data (only ATSC-M/H)
  * @atscmh_parade_id:	Parade identification number (only ATSC-M/H)
@@ -536,7 +538,7 @@ struct dvb_fe_events {
  * @lna:		Power ON/OFF/AUTO the Linear Now-noise Amplifier (LNA)
  * @strength:		DVBv5 API statistics: Signal Strength
  * @cnr:		DVBv5 API statistics: Signal to Noise ratio of the
- * 			(main) carrier
+ *			(main) carrier
  * @pre_bit_error:	DVBv5 API statistics: pre-Viterbi bit error count
  * @pre_bit_count:	DVBv5 API statistics: pre-Viterbi bit count
  * @post_bit_error:	DVBv5 API statistics: post-Viterbi bit error count
@@ -590,6 +592,9 @@ struct dtv_frontend_properties {
 
 	/* Multistream specifics */
 	u32			stream_id;
+
+	/* Physical Layer Scrambling specifics */
+	u32			scrambling_sequence_index;
 
 	/* ATSC-MH specifics */
 	u8			atscmh_fic_ver;

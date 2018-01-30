@@ -32,9 +32,10 @@
 
 #include <linux/dvb/dmx.h>
 
-#include "dvbdev.h"
-#include "demux.h"
-#include "dvb_ringbuffer.h"
+#include <media/dvbdev.h>
+#include <media/demux.h>
+#include <media/dvb_ringbuffer.h>
+#include <media/dvb_vb2.h>
 
 /**
  * enum dmxdev_type - type of demux filter type.
@@ -89,23 +90,29 @@ struct dmxdev_feed {
 /**
  * struct dmxdev_filter - digital TV dmxdev filter
  *
- * @filter:	a dmxdev filter. Currently used only for section filter:
- *		if the filter is Section, it contains a
- *		&struct dmx_section_filter @sec pointer.
- * @feed:	a dmxdev feed. Depending on the feed type, it can be:
- *		for TS feed: a &struct list_head @ts list of TS and PES
- *		feeds;
- *		for section feed: a &struct dmx_section_feed @sec pointer.
- * @params:	dmxdev filter parameters. Depending on the feed type, it
- *		can be:
- *		for section filter: a &struct dmx_sct_filter_params @sec
- *		embedded struct;
- *		for a TS filter: a &struct dmx_pes_filter_params @pes
- *		embedded struct.
+ * @filter:	a union describing a dmxdev filter.
+ *		Currently used only for section filters.
+ * @filter.sec: a &struct dmx_section_filter pointer.
+ *		For section filter only.
+ * @feed:	a union describing a dmxdev feed.
+ *		Depending on the filter type, it can be either
+ *		@feed.ts or @feed.sec.
+ * @feed.ts:	a &struct list_head list.
+ *		For TS and PES feeds.
+ * @feed.sec:	a &struct dmx_section_feed pointer.
+ *		For section feed only.
+ * @params:	a union describing dmxdev filter parameters.
+ *		Depending on the filter type, it can be either
+ *		@params.sec or @params.pes.
+ * @params.sec:	a &struct dmx_sct_filter_params embedded struct.
+ *		For section filter only.
+ * @params.pes:	a &struct dmx_pes_filter_params embedded struct.
+ *		For PES filter only.
  * @type:	type of the dmxdev filter, as defined by &enum dmxdev_type.
  * @state:	state of the dmxdev filter, as defined by &enum dmxdev_state.
  * @dev:	pointer to &struct dmxdev.
  * @buffer:	an embedded &struct dvb_ringbuffer buffer.
+ * @vb2_ctx:	control struct for VB2 handler
  * @mutex:	protects the access to &struct dmxdev_filter.
  * @timer:	&struct timer_list embedded timer, used to check for
  *		feed timeouts.
@@ -135,6 +142,7 @@ struct dmxdev_filter {
 	enum dmxdev_state state;
 	struct dmxdev *dev;
 	struct dvb_ringbuffer buffer;
+	struct dvb_vb2_ctx vb2_ctx;
 
 	struct mutex mutex;
 
@@ -158,6 +166,7 @@ struct dmxdev_filter {
  * @exit:		flag to indicate that the demux is being released.
  * @dvr_orig_fe:	pointer to &struct dmx_frontend.
  * @dvr_buffer:		embedded &struct dvb_ringbuffer for DVB output.
+ * @dvr_vb2_ctx:	control struct for VB2 handler
  * @mutex:		protects the usage of this structure.
  * @lock:		protects access to &dmxdev->filter->data.
  */
@@ -177,6 +186,8 @@ struct dmxdev {
 
 	struct dvb_ringbuffer dvr_buffer;
 #define DVR_BUFFER_SIZE (10*188*1024)
+
+	struct dvb_vb2_ctx dvr_vb2_ctx;
 
 	struct mutex mutex;
 	spinlock_t lock;
