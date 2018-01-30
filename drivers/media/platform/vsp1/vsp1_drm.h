@@ -15,12 +15,17 @@
 
 #include <linux/videodev2.h>
 
+#include <media/vsp1.h>
+
 #include "vsp1_pipe.h"
 
 /**
  * vsp1_drm_pipeline - State for the API exposed to the DRM driver
  * @pipe: the VSP1 pipeline used for display
  * @enabled: pipeline state at the beginning of an update
+ * @uif: UIF entity if available for the pipeline
+ * @crc.source: source for CRC calculation
+ * @crc.index: index of the CRC source plane (when crc.source is set to plane)
  * @du_complete: frame completion callback for the DU driver (optional)
  * @du_private: data to be passed to the du_complete callback
  */
@@ -28,8 +33,15 @@ struct vsp1_drm_pipeline {
 	struct vsp1_pipeline pipe;
 	bool enabled;
 
+	struct vsp1_entity *uif;
+
+	struct {
+		enum vsp1_du_crc_source source;
+		unsigned int index;
+	} crc;
+
 	/* Frame synchronisation */
-	void (*du_complete)(void *, bool);
+	void (*du_complete)(void *data, bool completed, u32 crc);
 	void *du_private;
 };
 

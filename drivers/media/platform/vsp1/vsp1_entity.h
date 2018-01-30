@@ -37,6 +37,7 @@ enum vsp1_entity_type {
 	VSP1_ENTITY_RPF,
 	VSP1_ENTITY_SRU,
 	VSP1_ENTITY_UDS,
+	VSP1_ENTITY_UIF,
 	VSP1_ENTITY_WPF,
 };
 
@@ -162,6 +163,12 @@ struct media_pad *vsp1_entity_remote_pad(struct media_pad *pad);
 int vsp1_subdev_get_pad_format(struct v4l2_subdev *subdev,
 			       struct v4l2_subdev_pad_config *cfg,
 			       struct v4l2_subdev_format *fmt);
+int vsp1_subdev_set_pad_format(struct v4l2_subdev *subdev,
+			       struct v4l2_subdev_pad_config *cfg,
+			       struct v4l2_subdev_format *fmt,
+			       const unsigned int *codes, unsigned int ncodes,
+			       unsigned int min_width, unsigned int min_height,
+			       unsigned int max_width, unsigned int max_height);
 int vsp1_subdev_enum_mbus_code(struct v4l2_subdev *subdev,
 			       struct v4l2_subdev_pad_config *cfg,
 			       struct v4l2_subdev_mbus_code_enum *code,
