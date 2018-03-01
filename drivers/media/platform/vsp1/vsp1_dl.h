@@ -20,7 +20,34 @@ struct vsp1_dl_manager;
 #define VSP1_DL_FRAME_END_COMPLETED		BIT(0)
 #define VSP1_DL_FRAME_END_INTERNAL		BIT(1)
 
-void vsp1_dlm_setup(struct vsp1_device *vsp1);
+/**
+ * struct vsp1_dl_ext_cmd - Extended Display command
+ * @free: entry in the pool of free commands list
+ * @cmd_opcode: command type opcode
+ * @flags: flags used by the command
+ * @cmds: array of command bodies for this extended cmd
+ * @num_cmds: quantity of commands in @cmds array
+ * @cmd_dma: DMA address of the command bodies
+ * @data: memory allocation for command specific data
+ * @data_dma: DMA address for command specific data
+ * @data_size: size of the @data_dma memory in bytes
+ */
+struct vsp1_dl_ext_cmd {
+	struct list_head free;
+
+	u8 cmd_opcode;
+	u32 flags;
+
+	struct vsp1_dl_ext_cmd_header *cmds;
+	unsigned int num_cmds;
+	dma_addr_t cmd_dma;
+
+	void *data;
+	dma_addr_t data_dma;
+	size_t data_size;
+};
+
+void vsp1_dlm_setup(struct vsp1_device *vsp1, unsigned int index);
 
 struct vsp1_dl_manager *vsp1_dlm_create(struct vsp1_device *vsp1,
 					unsigned int index,

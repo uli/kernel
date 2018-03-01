@@ -22,6 +22,9 @@
 #define VSP1_DLH_INT_ENABLE		(1 << 1)
 #define VSP1_DLH_AUTO_START		(1 << 0)
 
+#define VSP1_DLH_EXT_PRE_CMD_EXEC	(1 << 9)
+#define VSP1_DLH_EXT_POST_CMD_EXEC	(1 << 8)
+
 struct vsp1_dl_header_list {
 	u32 num_bytes;
 	u32 addr;
@@ -34,9 +37,32 @@ struct vsp1_dl_header {
 	u32 flags;
 };
 
+struct vsp1_dl_ext_header {
+	u32 reserved0;		/* alignment padding */
+
+	u16 pre_ext_cmd_qty;
+	u16 flags;
+	u32 pre_ext_cmd_plist;
+
+	u32 post_ext_cmd_qty;
+	u32 post_ext_cmd_plist;
+};
+
+struct vsp1_dl_header_extended {
+	struct vsp1_dl_header header;
+	struct vsp1_dl_ext_header ext;
+};
+
 struct vsp1_dl_entry {
 	u32 addr;
 	u32 data;
+};
+
+struct vsp1_dl_ext_cmd_header {
+	u32 cmd;
+	u32 flags;
+	u32 data;
+	u32 reserved;
 };
 
 /**
@@ -95,9 +121,12 @@ struct vsp1_dl_body_pool {
  * @list: entry in the display list manager lists
  * @dlm: the display list manager
  * @header: display list header
+ * @extended: extended display list header. NULL for normal lists
  * @dma: DMA address for the header
  * @body0: first display list body
  * @bodies: list of extra display list bodies
+ * @pre_cmd: pre cmd to be issued through extended dl header
+ * @post_cmd: post cmd to be issued through extended dl header
  * @has_chain: if true, indicates that there's a partition chain
  * @chain: entry in the display list partition chain
  * @internal: whether the display list is used for internal purpose
@@ -107,10 +136,14 @@ struct vsp1_dl_list {
 	struct vsp1_dl_manager *dlm;
 
 	struct vsp1_dl_header *header;
+	struct vsp1_dl_ext_header *extended;
 	dma_addr_t dma;
 
 	struct vsp1_dl_body *body0;
 	struct list_head bodies;
+
+	struct vsp1_dl_ext_cmd *pre_cmd;
+	struct vsp1_dl_ext_cmd *post_cmd;
 
 	bool has_chain;
 	struct list_head chain;
@@ -496,6 +529,14 @@ int vsp1_dl_list_add_chain(struct vsp1_dl_list *head,
 	return 0;
 }
 
+static void vsp1_dl_ext_cmd_fill_header(struct vsp1_dl_ext_cmd *cmd)
+{
+	cmd->cmds[0].cmd = cmd->cmd_opcode;
+	cmd->cmds[0].flags = cmd->flags;
+	cmd->cmds[0].data = cmd->data_dma;
+	cmd->cmds[0].reserved = 0;
+}
+
 static void vsp1_dl_list_fill_header(struct vsp1_dl_list *dl, bool is_last)
 {
 	struct vsp1_dl_manager *dlm = dl->dlm;
@@ -547,6 +588,27 @@ static void vsp1_dl_list_fill_header(struct vsp1_dl_list *dl, bool is_last)
 		 * and the next display list must not be started automatically.
 		 */
 		dl->header->flags = VSP1_DLH_INT_ENABLE;
+	}
+
+	if (!dl->extended)
+		return;
+
+	dl->extended->flags = 0;
+
+	if (dl->pre_cmd) {
+		dl->extended->pre_ext_cmd_plist = dl->pre_cmd->cmd_dma;
+		dl->extended->pre_ext_cmd_qty = dl->pre_cmd->num_cmds;
+		dl->extended->flags |= VSP1_DLH_EXT_PRE_CMD_EXEC;
+
+		vsp1_dl_ext_cmd_fill_header(dl->pre_cmd);
+	}
+
+	if (dl->post_cmd) {
+		dl->extended->pre_ext_cmd_plist = dl->post_cmd->cmd_dma;
+		dl->extended->pre_ext_cmd_qty = dl->post_cmd->num_cmds;
+		dl->extended->flags |= VSP1_DLH_EXT_POST_CMD_EXEC;
+
+		vsp1_dl_ext_cmd_fill_header(dl->pre_cmd);
 	}
 }
 
@@ -735,14 +797,20 @@ done:
 }
 
 /* Hardware Setup */
-void vsp1_dlm_setup(struct vsp1_device *vsp1)
+void vsp1_dlm_setup(struct vsp1_device *vsp1, unsigned int index)
 {
 	u32 ctrl = (256 << VI6_DL_CTRL_AR_WAIT_SHIFT)
 		 | VI6_DL_CTRL_DC2 | VI6_DL_CTRL_DC1 | VI6_DL_CTRL_DC0
 		 | VI6_DL_CTRL_DLE;
 
+	if (vsp1_feature(vsp1, VSP1_HAS_EXT_DL))
+		vsp1_write(vsp1, VI6_DL_EXT_CTRL(index),
+			   (0x02 << VI6_DL_EXT_CTRL_POLINT_SHIFT) |
+			   VI6_DL_EXT_CTRL_DLPRI | VI6_DL_EXT_CTRL_EXT);
+
 	vsp1_write(vsp1, VI6_DL_CTRL, ctrl);
-	vsp1_write(vsp1, VI6_DL_SWAP, VI6_DL_SWAP_LWS);
+	vsp1_write(vsp1, VI6_DL_SWAP(index), VI6_DL_SWAP_LWS |
+			 ((index == 1) ? VI6_DL_SWAP_IND : 0));
 }
 
 void vsp1_dlm_reset(struct vsp1_dl_manager *dlm)
@@ -787,7 +855,11 @@ struct vsp1_dl_manager *vsp1_dlm_create(struct vsp1_device *vsp1,
 	 * fragmentation, with the header located right after the body in
 	 * memory.
 	 */
-	header_size = ALIGN(sizeof(struct vsp1_dl_header), 8);
+	header_size = vsp1_feature(vsp1, VSP1_HAS_EXT_DL) ?
+			sizeof(struct vsp1_dl_header_extended) :
+			sizeof(struct vsp1_dl_header);
+
+	header_size = ALIGN(header_size, 8);
 
 	dlm->pool = vsp1_dl_body_pool_create(vsp1, prealloc,
 					     VSP1_DL_NUM_ENTRIES, header_size);
@@ -802,6 +874,11 @@ struct vsp1_dl_manager *vsp1_dlm_create(struct vsp1_device *vsp1,
 			vsp1_dlm_destroy(dlm);
 			return NULL;
 		}
+
+		/* The extended header immediately follows the header */
+		if (vsp1_feature(vsp1, VSP1_HAS_EXT_DL))
+			dl->extended = (void *)dl->header
+				     + sizeof(*dl->header);
 
 		list_add_tail(&dl->list, &dlm->free);
 	}

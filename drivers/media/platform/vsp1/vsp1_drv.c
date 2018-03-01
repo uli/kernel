@@ -545,7 +545,8 @@ static int vsp1_device_init(struct vsp1_device *vsp1)
 	vsp1_write(vsp1, VI6_DPR_HGT_SMPPT, (7 << VI6_DPR_SMPPT_TGW_SHIFT) |
 		   (VI6_DPR_NODE_UNUSED << VI6_DPR_SMPPT_PT_SHIFT));
 
-	vsp1_dlm_setup(vsp1);
+	for (i = 0; i < vsp1->info->wpf_count; ++i)
+		vsp1_dlm_setup(vsp1, i);
 
 	return 0;
 }
@@ -754,7 +755,7 @@ static const struct vsp1_device_info vsp1_device_infos[] = {
 		.version = VI6_IP_VERSION_MODEL_VSPD_GEN3,
 		.model = "VSP2-D",
 		.gen = 3,
-		.features = VSP1_HAS_BRU | VSP1_HAS_WPF_VFLIP,
+		.features = VSP1_HAS_BRU | VSP1_HAS_WPF_VFLIP | VSP1_HAS_EXT_DL,
 		.lif_count = 1,
 		.rpf_count = 5,
 		.uif_count = 1,
@@ -774,7 +775,7 @@ static const struct vsp1_device_info vsp1_device_infos[] = {
 		.version = VI6_IP_VERSION_MODEL_VSPDL_GEN3,
 		.model = "VSP2-DL",
 		.gen = 3,
-		.features = VSP1_HAS_BRS | VSP1_HAS_BRU,
+		.features = VSP1_HAS_BRS | VSP1_HAS_BRU | VSP1_HAS_EXT_DL,
 		.lif_count = 2,
 		.rpf_count = 5,
 		.uif_count = 2,
