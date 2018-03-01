@@ -186,6 +186,9 @@ static void rcar_du_vsp_plane_setup(struct rcar_du_vsp_plane *plane)
 	};
 	unsigned int i;
 
+	cfg.interlaced = !!(plane->plane.state->crtc->mode.flags
+			    & DRM_MODE_FLAG_INTERLACE);
+
 	cfg.src.left = state->state.src.x1 >> 16;
 	cfg.src.top = state->state.src.y1 >> 16;
 	cfg.src.width = drm_rect_width(&state->state.src) >> 16;
