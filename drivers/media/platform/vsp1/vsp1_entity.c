@@ -88,10 +88,11 @@ void vsp1_entity_configure_frame(struct vsp1_entity *entity,
 
 void vsp1_entity_configure_partition(struct vsp1_entity *entity,
 				     struct vsp1_pipeline *pipe,
+				     struct vsp1_dl_list *dl,
 				     struct vsp1_dl_body *dlb)
 {
 	if (entity->ops->configure_partition)
-		entity->ops->configure_partition(entity, pipe, dlb);
+		entity->ops->configure_partition(entity, pipe, dl, dlb);
 }
 
 /* -----------------------------------------------------------------------------
