@@ -256,6 +256,8 @@ static int device_wakeup_attach(struct device *dev, struct wakeup_source *ws)
 	if (dev->power.wakeirq)
 		device_wakeup_attach_irq(dev, dev->power.wakeirq);
 	spin_unlock_irq(&dev->power.lock);
+	if (dev->power.wakeup_change_notify)
+		dev->power.wakeup_change_notify(dev, true);
 	return 0;
 }
 
@@ -373,6 +375,8 @@ static struct wakeup_source *device_wakeup_detach(struct device *dev)
 {
 	struct wakeup_source *ws;
 
+	if (dev->power.wakeup_change_notify)
+		dev->power.wakeup_change_notify(dev, false);
 	spin_lock_irq(&dev->power.lock);
 	ws = dev->power.wakeup;
 	dev->power.wakeup = NULL;
