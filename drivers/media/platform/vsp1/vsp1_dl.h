@@ -22,6 +22,7 @@ struct vsp1_dl_manager;
 
 /**
  * struct vsp1_dl_ext_cmd - Extended Display command
+ * @pool: pool to which this command belongs
  * @free: entry in the pool of free commands list
  * @cmd_opcode: command type opcode
  * @flags: flags used by the command
@@ -33,6 +34,7 @@ struct vsp1_dl_manager;
  * @data_size: size of the @data_dma memory in bytes
  */
 struct vsp1_dl_ext_cmd {
+	struct vsp1_dl_cmd_pool *pool;
 	struct list_head free;
 
 	u8 cmd_opcode;
@@ -55,6 +57,7 @@ struct vsp1_dl_manager *vsp1_dlm_create(struct vsp1_device *vsp1,
 void vsp1_dlm_destroy(struct vsp1_dl_manager *dlm);
 void vsp1_dlm_reset(struct vsp1_dl_manager *dlm);
 unsigned int vsp1_dlm_irq_frame_end(struct vsp1_dl_manager *dlm);
+struct vsp1_dl_ext_cmd *vsp1_dlm_get_autofld_cmd(struct vsp1_dl_list *dl);
 
 struct vsp1_dl_list *vsp1_dl_list_get(struct vsp1_dl_manager *dlm);
 void vsp1_dl_list_put(struct vsp1_dl_list *dl);
