@@ -390,44 +390,50 @@ static void vsp1_video_pipeline_run_partition(struct vsp1_pipeline *pipe,
 static void vsp1_video_pipeline_run(struct vsp1_pipeline *pipe)
 {
 	struct vsp1_device *vsp1 = pipe->output->entity.vsp1;
+	struct vsp1_video *video = pipe->output->video;
+	struct vsp1_dl_list *dl;
 	struct vsp1_dl_body *dlb;
 	struct vsp1_entity *entity;
 	unsigned int partition;
 
-	if (!pipe->dl)
-		pipe->dl = vsp1_dl_list_get(pipe->output->dlm);
+	dl = vsp1_dl_list_get(pipe->output->dlm);
 
-	dlb = vsp1_dl_list_get_body0(pipe->dl);
+	/* Attach our pipe configuration to fully initialise the hardware. */
+	if (!pipe->configured) {
+		vsp1_dl_list_add_body(dl, video->stream_config);
+		pipe->configured = true;
+	}
+
+	dlb = vsp1_dl_list_get_body0(dl);
 
 	list_for_each_entry(entity, &pipe->entities, list_pipe)
-		vsp1_entity_configure_frame(entity, pipe, pipe->dl, dlb);
+		vsp1_entity_configure_frame(entity, pipe, dl, dlb);
 
 	/* Run the first partition. */
-	vsp1_video_pipeline_run_partition(pipe, pipe->dl, 0);
+	vsp1_video_pipeline_run_partition(pipe, dl, 0);
 
 	/* Process consecutive partitions as necessary. */
 	for (partition = 1; partition < pipe->partitions; ++partition) {
-		struct vsp1_dl_list *dl;
+		struct vsp1_dl_list *dl_next;
 
-		dl = vsp1_dl_list_get(pipe->output->dlm);
+		dl_next = vsp1_dl_list_get(pipe->output->dlm);
 
 		/*
 		 * An incomplete chain will still function, but output only
 		 * the partitions that had a dl available. The frame end
 		 * interrupt will be marked on the last dl in the chain.
 		 */
-		if (!dl) {
+		if (!dl_next) {
 			dev_err(vsp1->dev, "Failed to obtain a dl list. Frame will be incomplete\n");
 			break;
 		}
 
-		vsp1_video_pipeline_run_partition(pipe, dl, partition);
-		vsp1_dl_list_add_chain(pipe->dl, dl);
+		vsp1_video_pipeline_run_partition(pipe, dl_next, partition);
+		vsp1_dl_list_add_chain(dl, dl_next);
 	}
 
 	/* Complete, and commit the head display list. */
-	vsp1_dl_list_commit(pipe->dl, false);
-	pipe->dl = NULL;
+	vsp1_dl_list_commit(dl, false);
 
 	vsp1_pipeline_run(pipe);
 }
@@ -790,22 +796,14 @@ static void vsp1_video_buffer_queue(struct vb2_buffer *vb)
 
 static int vsp1_video_setup_pipeline(struct vsp1_pipeline *pipe)
 {
+	struct vsp1_video *video = pipe->output->video;
 	struct vsp1_entity *entity;
-	struct vsp1_dl_body *dlb;
 	int ret;
 
 	/* Determine this pipelines sizes for image partitioning support. */
 	ret = vsp1_video_pipeline_setup_partitions(pipe);
 	if (ret < 0)
 		return ret;
-
-	/* Prepare the display list. */
-	pipe->dl = vsp1_dl_list_get(pipe->output->dlm);
-	if (!pipe->dl)
-		return -ENOMEM;
-
-	/* Retrieve the default DLB from the list. */
-	dlb = vsp1_dl_list_get_body0(pipe->dl);
 
 	if (pipe->uds) {
 		struct vsp1_uds *uds = to_uds(&pipe->uds->subdev);
@@ -828,10 +826,20 @@ static int vsp1_video_setup_pipeline(struct vsp1_pipeline *pipe)
 		}
 	}
 
+	/* Obtain a clean body from our pool. */
+	video->stream_config = vsp1_dl_body_get(video->dlbs);
+	if (!video->stream_config)
+		return -ENOMEM;
+
+	/* Configure the entities into our cached pipe configuration. */
 	list_for_each_entry(entity, &pipe->entities, list_pipe) {
-		vsp1_entity_route_setup(entity, pipe, dlb);
-		vsp1_entity_configure_stream(entity, pipe, dlb);
+		vsp1_entity_route_setup(entity, pipe, video->stream_config);
+		vsp1_entity_configure_stream(entity, pipe,
+					     video->stream_config);
 	}
+
+	/* Ensure that our cached configuration is updated in the next DL. */
+	pipe->configured = false;
 
 	return 0;
 }
@@ -841,6 +849,9 @@ static void vsp1_video_cleanup_pipeline(struct vsp1_pipeline *pipe)
 	struct vsp1_video *video = pipe->output->video;
 	struct vsp1_vb2_buffer *buffer;
 	unsigned long flags;
+
+	/* Release any cached configuration. */
+	vsp1_dl_body_put(video->stream_config);
 
 	/* Remove all buffers from the IRQ queue. */
 	spin_lock_irqsave(&video->irqlock, flags);
@@ -918,9 +929,6 @@ static void vsp1_video_stop_streaming(struct vb2_queue *vq)
 		ret = vsp1_pipeline_stop(pipe);
 		if (ret == -ETIMEDOUT)
 			dev_err(video->vsp1->dev, "pipeline stop timeout\n");
-
-		vsp1_dl_list_put(pipe->dl);
-		pipe->dl = NULL;
 	}
 	mutex_unlock(&pipe->lock);
 
@@ -1240,6 +1248,16 @@ struct vsp1_video *vsp1_video_create(struct vsp1_device *vsp1,
 		goto error;
 	}
 
+	/*
+	 * Utilise a body pool to cache the constant configuration of the
+	 * pipeline object.
+	 */
+	video->dlbs = vsp1_dl_body_pool_create(vsp1, 3, 128, 0);
+	if (!video->dlbs) {
+		ret = -ENOMEM;
+		goto error;
+	}
+
 	return video;
 
 error:
@@ -1249,6 +1267,8 @@ error:
 
 void vsp1_video_cleanup(struct vsp1_video *video)
 {
+	vsp1_dl_body_pool_destroy(video->dlbs);
+
 	if (video_is_registered(&video->video))
 		video_unregister_device(&video->video);
 
