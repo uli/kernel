@@ -338,19 +338,21 @@ err_group:
 
 static void rvin_group_put(struct rvin_dev *vin)
 {
-	mutex_lock(&vin->group->lock);
+	struct rvin_group *group = vin->group;
+
+	mutex_lock(&group->lock);
 
 	vin->group = NULL;
 	vin->v4l2_dev.mdev = NULL;
 
-	if (WARN_ON(vin->group->vin[vin->id] != vin))
+	if (WARN_ON(group->vin[vin->id] != vin))
 		goto out;
 
-	vin->group->vin[vin->id] = NULL;
+	group->vin[vin->id] = NULL;
 out:
-	mutex_unlock(&vin->group->lock);
+	mutex_unlock(&group->lock);
 
-	kref_put(&vin->group->refcount, rvin_group_release);
+	kref_put(&group->refcount, rvin_group_release);
 }
 
 /* -----------------------------------------------------------------------------
@@ -404,6 +406,7 @@ static int rvin_digital_subdevice_attach(struct rvin_dev *vin,
 		code.index++;
 		switch (code.code) {
 		case MEDIA_BUS_FMT_YUYV8_1X16:
+		case MEDIA_BUS_FMT_UYVY8_1X16:
 		case MEDIA_BUS_FMT_UYVY8_2X8:
 		case MEDIA_BUS_FMT_UYVY10_2X10:
 		case MEDIA_BUS_FMT_RGB888_1X24:
