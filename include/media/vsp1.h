@@ -64,6 +64,7 @@ struct vsp1_du_atomic_config {
 		u32 key;
 		u32 alpha;
 	} colorkey;
+	bool interlaced;
 };
 
 /**
