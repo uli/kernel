@@ -19,14 +19,16 @@
 #define LUT_MIN_SIZE				4U
 #define LUT_MAX_SIZE				8190U
 
+#define LUT_SIZE				256
+
 /* -----------------------------------------------------------------------------
  * Device Access
  */
 
-static inline void vsp1_lut_write(struct vsp1_lut *lut, struct vsp1_dl_list *dl,
-				  u32 reg, u32 data)
+static inline void vsp1_lut_write(struct vsp1_lut *lut,
+				  struct vsp1_dl_body *dlb, u32 reg, u32 data)
 {
-	vsp1_dl_list_write(dl, reg, data);
+	vsp1_dl_body_write(dlb, reg, data);
 }
 
 /* -----------------------------------------------------------------------------
@@ -40,19 +42,19 @@ static int lut_set_table(struct vsp1_lut *lut, struct v4l2_ctrl *ctrl)
 	struct vsp1_dl_body *dlb;
 	unsigned int i;
 
-	dlb = vsp1_dl_fragment_alloc(lut->entity.vsp1, 256);
+	dlb = vsp1_dl_body_get(lut->pool);
 	if (!dlb)
 		return -ENOMEM;
 
-	for (i = 0; i < 256; ++i)
-		vsp1_dl_fragment_write(dlb, VI6_LUT_TABLE + 4 * i,
+	for (i = 0; i < LUT_SIZE; ++i)
+		vsp1_dl_body_write(dlb, VI6_LUT_TABLE + 4 * i,
 				       ctrl->p_new.p_u32[i]);
 
 	spin_lock_irq(&lut->lock);
 	swap(lut->lut, dlb);
 	spin_unlock_irq(&lut->lock);
 
-	vsp1_dl_fragment_free(dlb);
+	vsp1_dl_body_put(dlb);
 	return 0;
 }
 
@@ -83,7 +85,7 @@ static const struct v4l2_ctrl_config lut_table_control = {
 	.max = 0x00ffffff,
 	.step = 1,
 	.def = 0,
-	.dims = { 256},
+	.dims = { LUT_SIZE },
 };
 
 /* -----------------------------------------------------------------------------
@@ -143,37 +145,48 @@ static const struct v4l2_subdev_ops lut_ops = {
  * VSP1 Entity Operations
  */
 
-static void lut_configure(struct vsp1_entity *entity,
-			  struct vsp1_pipeline *pipe,
-			  struct vsp1_dl_list *dl,
-			  enum vsp1_entity_params params)
+static void lut_configure_stream(struct vsp1_entity *entity,
+				 struct vsp1_pipeline *pipe,
+				 struct vsp1_dl_body *dlb)
 {
 	struct vsp1_lut *lut = to_lut(&entity->subdev);
-	struct vsp1_dl_body *dlb;
+
+	vsp1_lut_write(lut, dlb, VI6_LUT_CTRL, VI6_LUT_CTRL_EN);
+}
+
+static void lut_configure_frame(struct vsp1_entity *entity,
+				struct vsp1_pipeline *pipe,
+				struct vsp1_dl_list *dl,
+				struct vsp1_dl_body *dlb)
+{
+	struct vsp1_lut *lut = to_lut(&entity->subdev);
+	struct vsp1_dl_body *lut_dlb;
 	unsigned long flags;
 
-	switch (params) {
-	case VSP1_ENTITY_PARAMS_INIT:
-		vsp1_lut_write(lut, dl, VI6_LUT_CTRL, VI6_LUT_CTRL_EN);
-		break;
+	spin_lock_irqsave(&lut->lock, flags);
+	lut_dlb = lut->lut;
+	lut->lut = NULL;
+	spin_unlock_irqrestore(&lut->lock, flags);
 
-	case VSP1_ENTITY_PARAMS_PARTITION:
-		break;
+	if (lut_dlb) {
+		vsp1_dl_list_add_body(dl, lut_dlb);
 
-	case VSP1_ENTITY_PARAMS_RUNTIME:
-		spin_lock_irqsave(&lut->lock, flags);
-		dlb = lut->lut;
-		lut->lut = NULL;
-		spin_unlock_irqrestore(&lut->lock, flags);
-
-		if (dlb)
-			vsp1_dl_list_add_fragment(dl, dlb);
-		break;
+		/* Release our local reference. */
+		vsp1_dl_body_put(lut_dlb);
 	}
 }
 
+static void lut_destroy(struct vsp1_entity *entity)
+{
+	struct vsp1_lut *lut = to_lut(&entity->subdev);
+
+	vsp1_dl_body_pool_destroy(lut->pool);
+}
+
 static const struct vsp1_entity_operations lut_entity_ops = {
-	.configure = lut_configure,
+	.configure_stream = lut_configure_stream,
+	.configure_frame = lut_configure_frame,
+	.destroy = lut_destroy,
 };
 
 /* -----------------------------------------------------------------------------
@@ -198,6 +211,15 @@ struct vsp1_lut *vsp1_lut_create(struct vsp1_device *vsp1)
 			       MEDIA_ENT_F_PROC_VIDEO_LUT);
 	if (ret < 0)
 		return ERR_PTR(ret);
+
+	/*
+	 * Pre-allocate a body pool, with 3 bodies allowing a userspace update
+	 * before the hardware has committed a previous set of tables, handling
+	 * both the queued and pending dl entries.
+	 */
+	lut->pool = vsp1_dl_body_pool_create(vsp1, 3, LUT_SIZE, 0);
+	if (!lut->pool)
+		return ERR_PTR(-ENOMEM);
 
 	/* Initialize the control handler. */
 	v4l2_ctrl_handler_init(&lut->ctrls, 1);

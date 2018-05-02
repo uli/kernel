@@ -230,6 +230,7 @@ void vsp1_pipeline_run(struct vsp1_pipeline *pipe)
 		vsp1_write(vsp1, VI6_CMD(pipe->output->entity.index),
 			   VI6_CMD_STRCMD);
 		pipe->state = VSP1_PIPELINE_RUNNING;
+		pipe->configured = true;
 	}
 
 	pipe->buffers_ready = 0;
@@ -295,6 +296,8 @@ int vsp1_pipeline_stop(struct vsp1_pipeline *pipe)
 
 	v4l2_subdev_call(&pipe->output->entity.subdev, video, s_stream, 0);
 
+	pipe->configured = false;
+
 	return ret;
 }
 
@@ -348,7 +351,7 @@ void vsp1_pipeline_frame_end(struct vsp1_pipeline *pipe)
  * from the input RPF alpha.
  */
 void vsp1_pipeline_propagate_alpha(struct vsp1_pipeline *pipe,
-				   struct vsp1_dl_list *dl, unsigned int alpha)
+				   struct vsp1_dl_body *dlb, unsigned int alpha)
 {
 	if (!pipe->uds)
 		return;
@@ -361,7 +364,7 @@ void vsp1_pipeline_propagate_alpha(struct vsp1_pipeline *pipe,
 	    pipe->uds_input->type == VSP1_ENTITY_BRS)
 		alpha = 255;
 
-	vsp1_uds_set_alpha(pipe->uds, dl, alpha);
+	vsp1_uds_set_alpha(pipe->uds, dlb, alpha);
 }
 
 /*
@@ -451,6 +454,12 @@ void vsp1_pipelines_resume(struct vsp1_device *vsp1)
 			continue;
 
 		spin_lock_irqsave(&pipe->irqlock, flags);
+		/*
+		 * The hardware may have been reset during a suspend and will
+		 * need a full reconfiguration.
+		 */
+		pipe->configured = false;
+
 		if (vsp1_pipeline_ready(pipe))
 			vsp1_pipeline_run(pipe);
 		spin_unlock_irqrestore(&pipe->irqlock, flags);
