@@ -49,4 +49,8 @@ int drm_plane_create_zpos_immutable_property(struct drm_plane *plane,
 					     unsigned int zpos);
 int drm_atomic_normalize_zpos(struct drm_device *dev,
 			      struct drm_atomic_state *state);
+
+int drm_plane_create_colorkey_properties(struct drm_plane *plane,
+					 const struct drm_prop_enum_list *modes,
+					 unsigned int num_modes, bool replace);
 #endif
