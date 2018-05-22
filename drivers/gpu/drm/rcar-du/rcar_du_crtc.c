@@ -942,10 +942,22 @@ int rcar_du_crtc_create(struct rcar_du_group *rgrp, unsigned int swindex,
 		return PTR_ERR(rcrtc->clock);
 	}
 
+	sprintf(clk_name, "extal");
+	clk = devm_clk_get(rcdu->dev, clk_name);
+	if (!IS_ERR(clk)) {
+		rcrtc->extclock = clk;
+		rcrtc->extal_use = true;
+	} else if (PTR_ERR(rcrtc->clock) == -EPROBE_DEFER) {
+		dev_info(rcdu->dev, "can't get extal clock %u\n",
+			 hwindex);
+		return -EPROBE_DEFER;
+	}
+
 	sprintf(clk_name, "dclkin.%u", hwindex);
 	clk = devm_clk_get(rcdu->dev, clk_name);
 	if (!IS_ERR(clk)) {
 		rcrtc->extclock = clk;
+		rcrtc->extal_use = false;
 	} else if (PTR_ERR(rcrtc->clock) == -EPROBE_DEFER) {
 		dev_info(rcdu->dev, "can't get external clock %u\n", hwindex);
 		return -EPROBE_DEFER;
