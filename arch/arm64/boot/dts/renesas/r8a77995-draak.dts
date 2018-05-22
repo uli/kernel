@@ -2,7 +2,7 @@
 /*
  * Device Tree Source for the Draak board
  *
- * Copyright (C) 2016 Renesas Electronics Corp.
+ * Copyright (C) 2016-2018 Renesas Electronics Corp.
  * Copyright (C) 2017 Glider bvba
  */
 
@@ -269,8 +269,10 @@
 
 	clocks = <&cpg CPG_MOD 724>,
 		 <&cpg CPG_MOD 723>,
-		 <&x12_clk>;
-	clock-names = "du.0", "du.1", "dclkin.0";
+		 <&x12_clk>,
+		 <&extal_clk>;
+	clock-names = "du.0", "du.1",
+		      "dclkin.0", "extal";
 
 	ports {
 		port@0 {
