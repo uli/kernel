@@ -209,6 +209,10 @@ stack_trace_call(unsigned long ip, unsigned long parent_ip,
 	if (__this_cpu_read(disable_stack_tracer) != 1)
 		goto out;
 
+	/* If rcu is not watching, then save stack trace can fail */
+	if (!rcu_is_watching())
+		goto out;
+
 	ip += MCOUNT_INSN_SIZE;
 
 	check_stack(ip, &stack);
@@ -468,7 +472,7 @@ static __init int stack_trace_init(void)
 			NULL, &stack_trace_fops);
 
 #ifdef CONFIG_DYNAMIC_FTRACE
-	trace_create_file("stack_trace_filter", 0444, d_tracer,
+	trace_create_file("stack_trace_filter", 0644, d_tracer,
 			  &trace_ops, &stack_trace_filter_fops);
 #endif
 

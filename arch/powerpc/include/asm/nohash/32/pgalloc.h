@@ -61,7 +61,8 @@ static inline void pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmdp,
 static inline void pmd_populate(struct mm_struct *mm, pmd_t *pmdp,
 				pgtable_t pte_page)
 {
-	*pmdp = __pmd((page_to_pfn(pte_page) << PAGE_SHIFT) | _PMD_PRESENT);
+	*pmdp = __pmd((page_to_pfn(pte_page) << PAGE_SHIFT) | _PMD_USER |
+		      _PMD_PRESENT);
 }
 
 #define pmd_pgtable(pmd) pmd_page(pmd)
@@ -99,6 +100,7 @@ static inline void pte_free(struct mm_struct *mm, pgtable_t ptepage)
 static inline void pgtable_free(void *table, unsigned index_size)
 {
 	if (!index_size) {
+		pgtable_page_dtor(virt_to_page(table));
 		free_page((unsigned long)table);
 	} else {
 		BUG_ON(index_size > MAX_PGTABLE_INDEX_SIZE);

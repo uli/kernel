@@ -172,7 +172,9 @@ i915_mmu_notifier_create(struct mm_struct *mm)
 	spin_lock_init(&mn->lock);
 	mn->mn.ops = &i915_gem_userptr_notifier;
 	mn->objects = RB_ROOT_CACHED;
-	mn->wq = alloc_workqueue("i915-userptr-release", WQ_UNBOUND, 0);
+	mn->wq = alloc_workqueue("i915-userptr-release",
+				 WQ_UNBOUND | WQ_MEM_RECLAIM,
+				 0);
 	if (mn->wq == NULL) {
 		kfree(mn);
 		return ERR_PTR(-ENOMEM);
@@ -719,7 +721,7 @@ static const struct drm_i915_gem_object_ops i915_gem_userptr_ops = {
 	.release = i915_gem_userptr_release,
 };
 
-/**
+/*
  * Creates a new mm object that wraps some normal memory from the process
  * context - user memory.
  *
@@ -755,7 +757,9 @@ static const struct drm_i915_gem_object_ops i915_gem_userptr_ops = {
  * dma-buf instead.
  */
 int
-i915_gem_userptr_ioctl(struct drm_device *dev, void *data, struct drm_file *file)
+i915_gem_userptr_ioctl(struct drm_device *dev,
+		       void *data,
+		       struct drm_file *file)
 {
 	struct drm_i915_private *dev_priv = to_i915(dev);
 	struct drm_i915_gem_userptr *args = data;
@@ -772,6 +776,9 @@ i915_gem_userptr_ioctl(struct drm_device *dev, void *data, struct drm_file *file
 
 	if (args->flags & ~(I915_USERPTR_READ_ONLY |
 			    I915_USERPTR_UNSYNCHRONIZED))
+		return -EINVAL;
+
+	if (!args->user_size)
 		return -EINVAL;
 
 	if (offset_in_page(args->user_ptr | args->user_size))
@@ -794,8 +801,8 @@ i915_gem_userptr_ioctl(struct drm_device *dev, void *data, struct drm_file *file
 
 	drm_gem_private_object_init(dev, &obj->base, args->user_size);
 	i915_gem_object_init(obj, &i915_gem_userptr_ops);
-	obj->base.read_domains = I915_GEM_DOMAIN_CPU;
-	obj->base.write_domain = I915_GEM_DOMAIN_CPU;
+	obj->read_domains = I915_GEM_DOMAIN_CPU;
+	obj->write_domain = I915_GEM_DOMAIN_CPU;
 	i915_gem_object_set_cache_coherency(obj, I915_CACHE_LLC);
 
 	obj->userptr.ptr = args->user_ptr;
@@ -827,7 +834,7 @@ int i915_gem_init_userptr(struct drm_i915_private *dev_priv)
 
 	dev_priv->mm.userptr_wq =
 		alloc_workqueue("i915-userptr-acquire",
-				WQ_HIGHPRI | WQ_MEM_RECLAIM,
+				WQ_HIGHPRI | WQ_UNBOUND,
 				0);
 	if (!dev_priv->mm.userptr_wq)
 		return -ENOMEM;

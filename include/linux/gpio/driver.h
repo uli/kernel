@@ -66,9 +66,10 @@ struct gpio_irq_chip {
 	/**
 	 * @lock_key:
 	 *
-	 * Per GPIO IRQ chip lockdep class.
+	 * Per GPIO IRQ chip lockdep classes.
 	 */
 	struct lock_class_key *lock_key;
+	struct lock_class_key *request_key;
 
 	/**
 	 * @parent_handler:
@@ -287,6 +288,21 @@ struct gpio_chip {
 	struct gpio_irq_chip irq;
 #endif
 
+	/**
+	 * @need_valid_mask:
+	 *
+	 * If set core allocates @valid_mask with all bits set to one.
+	 */
+	bool need_valid_mask;
+
+	/**
+	 * @valid_mask:
+	 *
+	 * If not %NULL holds bitmask of GPIOs which are valid to be used
+	 * from the chip.
+	 */
+	unsigned long *valid_mask;
+
 #if defined(CONFIG_OF_GPIO)
 	/*
 	 * If CONFIG_OF is enabled, then all GPIO controllers described in the
@@ -323,7 +339,8 @@ extern const char *gpiochip_is_requested(struct gpio_chip *chip,
 
 /* add/remove chips */
 extern int gpiochip_add_data_with_key(struct gpio_chip *chip, void *data,
-				      struct lock_class_key *lock_key);
+				      struct lock_class_key *lock_key,
+				      struct lock_class_key *request_key);
 
 /**
  * gpiochip_add_data() - register a gpio_chip
@@ -350,11 +367,13 @@ extern int gpiochip_add_data_with_key(struct gpio_chip *chip, void *data,
  */
 #ifdef CONFIG_LOCKDEP
 #define gpiochip_add_data(chip, data) ({		\
-		static struct lock_class_key key;	\
-		gpiochip_add_data_with_key(chip, data, &key);	\
+		static struct lock_class_key lock_key;	\
+		static struct lock_class_key request_key;	  \
+		gpiochip_add_data_with_key(chip, data, &lock_key, \
+					   &request_key);	  \
 	})
 #else
-#define gpiochip_add_data(chip, data) gpiochip_add_data_with_key(chip, data, NULL)
+#define gpiochip_add_data(chip, data) gpiochip_add_data_with_key(chip, data, NULL, NULL)
 #endif
 
 static inline int gpiochip_add(struct gpio_chip *chip)
@@ -380,6 +399,7 @@ bool gpiochip_line_is_open_source(struct gpio_chip *chip, unsigned int offset);
 
 /* Sleep persistence inquiry for drivers */
 bool gpiochip_line_is_persistent(struct gpio_chip *chip, unsigned int offset);
+bool gpiochip_line_is_valid(const struct gpio_chip *chip, unsigned int offset);
 
 /* get driver data */
 void *gpiochip_get_data(struct gpio_chip *chip);
@@ -429,7 +449,11 @@ int gpiochip_irqchip_add_key(struct gpio_chip *gpiochip,
 			     irq_flow_handler_t handler,
 			     unsigned int type,
 			     bool threaded,
-			     struct lock_class_key *lock_key);
+			     struct lock_class_key *lock_key,
+			     struct lock_class_key *request_key);
+
+bool gpiochip_irqchip_irq_valid(const struct gpio_chip *gpiochip,
+				unsigned int offset);
 
 #ifdef CONFIG_LOCKDEP
 
@@ -445,10 +469,12 @@ static inline int gpiochip_irqchip_add(struct gpio_chip *gpiochip,
 				       irq_flow_handler_t handler,
 				       unsigned int type)
 {
-	static struct lock_class_key key;
+	static struct lock_class_key lock_key;
+	static struct lock_class_key request_key;
 
 	return gpiochip_irqchip_add_key(gpiochip, irqchip, first_irq,
-					handler, type, false, &key);
+					handler, type, false,
+					&lock_key, &request_key);
 }
 
 static inline int gpiochip_irqchip_add_nested(struct gpio_chip *gpiochip,
@@ -458,10 +484,12 @@ static inline int gpiochip_irqchip_add_nested(struct gpio_chip *gpiochip,
 			  unsigned int type)
 {
 
-	static struct lock_class_key key;
+	static struct lock_class_key lock_key;
+	static struct lock_class_key request_key;
 
 	return gpiochip_irqchip_add_key(gpiochip, irqchip, first_irq,
-					handler, type, true, &key);
+					handler, type, true,
+					&lock_key, &request_key);
 }
 #else
 static inline int gpiochip_irqchip_add(struct gpio_chip *gpiochip,
@@ -471,7 +499,7 @@ static inline int gpiochip_irqchip_add(struct gpio_chip *gpiochip,
 				       unsigned int type)
 {
 	return gpiochip_irqchip_add_key(gpiochip, irqchip, first_irq,
-					handler, type, false, NULL);
+					handler, type, false, NULL, NULL);
 }
 
 static inline int gpiochip_irqchip_add_nested(struct gpio_chip *gpiochip,
@@ -481,7 +509,7 @@ static inline int gpiochip_irqchip_add_nested(struct gpio_chip *gpiochip,
 			  unsigned int type)
 {
 	return gpiochip_irqchip_add_key(gpiochip, irqchip, first_irq,
-					handler, type, true, NULL);
+					handler, type, true, NULL, NULL);
 }
 #endif /* CONFIG_LOCKDEP */
 

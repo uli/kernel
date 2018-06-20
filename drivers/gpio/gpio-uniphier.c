@@ -371,8 +371,7 @@ static int uniphier_gpio_probe(struct platform_device *pdev)
 		return ret;
 
 	nregs = uniphier_gpio_get_nbanks(ngpios) * 2 + 3;
-	priv = devm_kzalloc(dev,
-			    sizeof(*priv) + sizeof(priv->saved_vals[0]) * nregs,
+	priv = devm_kzalloc(dev, struct_size(priv, saved_vals, nregs),
 			    GFP_KERNEL);
 	if (!priv)
 		return -ENOMEM;
@@ -505,4 +504,4 @@ module_platform_driver(uniphier_gpio_driver);
 
 MODULE_AUTHOR("Masahiro Yamada <yamada.masahiro@socionext.com>");
 MODULE_DESCRIPTION("UniPhier GPIO driver");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("GPL v2");

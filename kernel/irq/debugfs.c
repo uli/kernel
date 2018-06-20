@@ -1,8 +1,6 @@
-/*
- * Copyright 2017 Thomas Gleixner <tglx@linutronix.de>
- *
- * This file is licensed under the GPL V2.
- */
+// SPDX-License-Identifier: GPL-2.0
+// Copyright 2017 Thomas Gleixner <tglx@linutronix.de>
+
 #include <linux/irqdomain.h>
 #include <linux/irq.h>
 #include <linux/uaccess.h>
@@ -113,6 +111,7 @@ static const struct irq_bit_descr irqdata_states[] = {
 	BIT_MASK_DESCR(IRQD_SETAFFINITY_PENDING),
 	BIT_MASK_DESCR(IRQD_AFFINITY_MANAGED),
 	BIT_MASK_DESCR(IRQD_MANAGED_SHUTDOWN),
+	BIT_MASK_DESCR(IRQD_CAN_RESERVE),
 
 	BIT_MASK_DESCR(IRQD_FORWARDED_TO_VCPU),
 

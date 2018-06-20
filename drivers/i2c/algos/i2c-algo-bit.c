@@ -519,9 +519,7 @@ static int bit_doAddress(struct i2c_adapter *i2c_adap, struct i2c_msg *msg)
 			}
 		}
 	} else {		/* normal 7bit address	*/
-		addr = msg->addr << 1;
-		if (flags & I2C_M_RD)
-			addr |= 1;
+		addr = i2c_8bit_addr_from_msg(msg);
 		if (flags & I2C_M_REV_DIR_ADDR)
 			addr ^= 1;
 		ret = try_address(i2c_adap, addr, retries);
@@ -648,6 +646,11 @@ static int __i2c_bit_add_bus(struct i2c_adapter *adap,
 	adap->retries = 3;
 	if (bit_adap->getscl == NULL)
 		adap->quirks = &i2c_bit_quirk_no_clk_stretch;
+
+	/* Bring bus to a known state. Looks like STOP if bus is not free yet */
+	setscl(bit_adap, 1);
+	udelay(bit_adap->udelay);
+	setsda(bit_adap, 1);
 
 	ret = add_adapter(adap);
 	if (ret < 0)

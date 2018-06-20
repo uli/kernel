@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  *    Copyright IBM Corp. 2007
  *    Author(s): Utz Bacher <utz.bacher@de.ibm.com>,
@@ -143,6 +144,8 @@ static ssize_t qeth_dev_portno_store(struct device *dev,
 		goto out;
 	}
 	card->info.portno = portno;
+	if (card->dev)
+		card->dev->dev_port = portno;
 out:
 	mutex_unlock(&card->conf_mutex);
 	return rc ? rc : count;

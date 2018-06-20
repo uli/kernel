@@ -354,9 +354,12 @@ static int bcm_sf2_cfp_ipv4_rule_set(struct bcm_sf2_priv *priv, int port,
 	/* Locate the first rule available */
 	if (fs->location == RX_CLS_LOC_ANY)
 		rule_index = find_first_zero_bit(priv->cfp.used,
-						 bcm_sf2_cfp_rule_size(priv));
+						 priv->num_cfp_rules);
 	else
 		rule_index = fs->location;
+
+	if (rule_index > bcm_sf2_cfp_rule_size(priv))
+		return -ENOSPC;
 
 	layout = &udf_tcpip4_layout;
 	/* We only use one UDF slice for now */
@@ -562,19 +565,21 @@ static int bcm_sf2_cfp_ipv6_rule_set(struct bcm_sf2_priv *priv, int port,
 	 * first half because the HW search is by incrementing addresses.
 	 */
 	if (fs->location == RX_CLS_LOC_ANY)
-		rule_index[0] = find_first_zero_bit(priv->cfp.used,
-						    bcm_sf2_cfp_rule_size(priv));
+		rule_index[1] = find_first_zero_bit(priv->cfp.used,
+						    priv->num_cfp_rules);
 	else
-		rule_index[0] = fs->location;
+		rule_index[1] = fs->location;
+	if (rule_index[1] > bcm_sf2_cfp_rule_size(priv))
+		return -ENOSPC;
 
 	/* Flag it as used (cleared on error path) such that we can immediately
 	 * obtain a second one to chain from.
 	 */
-	set_bit(rule_index[0], priv->cfp.used);
+	set_bit(rule_index[1], priv->cfp.used);
 
-	rule_index[1] = find_first_zero_bit(priv->cfp.used,
-					    bcm_sf2_cfp_rule_size(priv));
-	if (rule_index[1] > bcm_sf2_cfp_rule_size(priv)) {
+	rule_index[0] = find_first_zero_bit(priv->cfp.used,
+					    priv->num_cfp_rules);
+	if (rule_index[0] > bcm_sf2_cfp_rule_size(priv)) {
 		ret = -ENOSPC;
 		goto out_err;
 	}
@@ -625,7 +630,7 @@ static int bcm_sf2_cfp_ipv6_rule_set(struct bcm_sf2_priv *priv, int port,
 	bcm_sf2_cfp_slice_ipv6(priv, v6_spec->ip6src, v6_spec->psrc,
 				slice_num, false);
 	bcm_sf2_cfp_slice_ipv6(priv, v6_m_spec->ip6src, v6_m_spec->psrc,
-				slice_num, true);
+				SLICE_NUM_MASK, true);
 
 	/* Insert into TCAM now because we need to insert a second rule */
 	bcm_sf2_cfp_rule_addr_set(priv, rule_index[0]);
@@ -699,7 +704,7 @@ static int bcm_sf2_cfp_ipv6_rule_set(struct bcm_sf2_priv *priv, int port,
 	/* Insert into Action and policer RAMs now, set chain ID to
 	 * the one we are chained to
 	 */
-	ret = bcm_sf2_cfp_act_pol_set(priv, rule_index[0], port_num,
+	ret = bcm_sf2_cfp_act_pol_set(priv, rule_index[1], port_num,
 				      queue_num, true);
 	if (ret)
 		goto out_err;
@@ -712,14 +717,14 @@ static int bcm_sf2_cfp_ipv6_rule_set(struct bcm_sf2_priv *priv, int port,
 	/* Flag the second half rule as being used now, return it as the
 	 * location, and flag it as unique while dumping rules
 	 */
-	set_bit(rule_index[1], priv->cfp.used);
+	set_bit(rule_index[0], priv->cfp.used);
 	set_bit(rule_index[1], priv->cfp.unique);
 	fs->location = rule_index[1];
 
 	return ret;
 
 out_err:
-	clear_bit(rule_index[0], priv->cfp.used);
+	clear_bit(rule_index[1], priv->cfp.used);
 	return ret;
 }
 
@@ -785,10 +790,6 @@ static int bcm_sf2_cfp_rule_del_one(struct bcm_sf2_priv *priv, int port,
 	int ret;
 	u32 reg;
 
-	/* Refuse deletion of unused rules, and the default reserved rule */
-	if (!test_bit(loc, priv->cfp.used) || loc == 0)
-		return -EINVAL;
-
 	/* Indicate which rule we want to read */
 	bcm_sf2_cfp_rule_addr_set(priv, loc);
 
@@ -825,6 +826,13 @@ static int bcm_sf2_cfp_rule_del(struct bcm_sf2_priv *priv, int port,
 {
 	u32 next_loc = 0;
 	int ret;
+
+	/* Refuse deleting unused rules, and those that are not unique since
+	 * that could leave IPv6 rules with one of the chained rule in the
+	 * table.
+	 */
+	if (!test_bit(loc, priv->cfp.unique) || loc == 0)
+		return -EINVAL;
 
 	ret = bcm_sf2_cfp_rule_del_one(priv, port, loc, &next_loc);
 	if (ret)
