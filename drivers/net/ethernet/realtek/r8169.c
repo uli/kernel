@@ -7148,7 +7148,7 @@ static void rtl8169_netpoll(struct net_device *dev)
 {
 	struct rtl8169_private *tp = netdev_priv(dev);
 
-	rtl8169_interrupt(pci_irq_vector(tp->pci_dev, 0), dev);
+	rtl8169_interrupt(pci_irq_vector(tp->pci_dev, 0), tp);
 }
 #endif
 
@@ -7789,6 +7789,7 @@ static int rtl_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 		NETIF_F_HW_VLAN_CTAG_RX;
 	dev->vlan_features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_TSO |
 		NETIF_F_HIGHDMA;
+	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
 
 	tp->cp_cmd |= RxChkSum | RxVlan;
 
