@@ -8,7 +8,6 @@ Required properties:
   "bosch,bme280"
 
 Optional properties:
-- interrupt-parent: should be the phandle for the interrupt controller
 - interrupts: interrupt mapping for IRQ
 - reset-gpios: a GPIO line handling reset of the sensor: as the line is
   active low, it should be marked GPIO_ACTIVE_LOW (see gpio/gpio.txt)
