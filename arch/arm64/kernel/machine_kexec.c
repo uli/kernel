@@ -184,7 +184,7 @@ void machine_kexec(struct kimage *kimage)
 
 	/* Flush the reboot_code_buffer in preparation for its execution. */
 	__flush_dcache_area(reboot_code_buffer, arm64_relocate_new_kernel_size);
-	flush_icache_range((uintptr_t)reboot_code_buffer,
+	__flush_icache_range((uintptr_t)reboot_code_buffer,
 		arm64_relocate_new_kernel_size);
 
 	/* Flush the kimage list and its buffers. */
@@ -207,8 +207,7 @@ void machine_kexec(struct kimage *kimage)
 	 * relocation is complete.
 	 */
 
-	cpu_soft_restart(kimage != kexec_crash_image,
-		reboot_code_buffer_phys, kimage->head, kimage->start, 0);
+	cpu_soft_restart(reboot_code_buffer_phys, kimage->head, kimage->start, 0);
 
 	BUG(); /* Should never get here. */
 }
