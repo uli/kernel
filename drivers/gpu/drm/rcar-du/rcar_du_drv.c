@@ -336,7 +336,7 @@ static struct drm_driver rcar_du_driver = {
 	.gem_prime_import	= drm_gem_prime_import,
 	.gem_prime_export	= drm_gem_prime_export,
 	.gem_prime_get_sg_table	= drm_gem_cma_prime_get_sg_table,
-	.gem_prime_import_sg_table = drm_gem_cma_prime_import_sg_table,
+	.gem_prime_import_sg_table = rcar_du_gem_prime_import_sg_table,
 	.gem_prime_vmap		= drm_gem_cma_prime_vmap,
 	.gem_prime_vunmap	= drm_gem_cma_prime_vunmap,
 	.gem_prime_mmap		= drm_gem_cma_prime_mmap,
@@ -417,6 +417,7 @@ static int rcar_du_probe(struct platform_device *pdev)
 	struct rcar_du_device *rcdu;
 	struct drm_device *ddev;
 	struct resource *mem;
+	unsigned int mask;
 	int ret;
 
 	/* Allocate and initialize the R-Car device structure. */
@@ -434,6 +435,16 @@ static int rcar_du_probe(struct platform_device *pdev)
 	rcdu->mmio = devm_ioremap_resource(&pdev->dev, mem);
 	if (IS_ERR(rcdu->mmio))
 		return PTR_ERR(rcdu->mmio);
+
+	/*
+	 * Set the DMA coherent mask to reflect the DU 32-bit DMA address space
+	 * limitations. When sourcing frames from a VSP the DU doesn't perform
+	 * any memory access so set the mask to 40 bits to accept all buffers.
+	 */
+	mask = rcar_du_has(rcdu, RCAR_DU_FEATURE_VSP1_SOURCE) ? 40 : 32;
+	ret = dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(mask));
+	if (ret)
+		return ret;
 
 	/* DRM/KMS objects */
 	ddev = drm_dev_alloc(&rcar_du_driver, &pdev->dev);
