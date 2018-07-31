@@ -671,8 +671,20 @@ int vsp1_du_setup_lif(struct device *dev, unsigned int pipe_index,
 	drm_pipe->width = cfg->width;
 	drm_pipe->height = cfg->height;
 
-	dev_dbg(vsp1->dev, "%s: configuring LIF%u with format %ux%u\n",
-		__func__, pipe_index, cfg->width, cfg->height);
+	if (cfg->interlaced && !vsp1_feature(vsp1, VSP1_HAS_EXT_DL)) {
+		/*
+		 * Interlaced support requires extended display lists to
+		 * provide the auto-fld feature with the DU.
+		 */
+		dev_dbg(vsp1->dev, "Interlaced unsupported on this pipeline\n");
+		return -EINVAL;
+	}
+
+	pipe->interlaced = cfg->interlaced;
+
+	dev_dbg(vsp1->dev, "%s: configuring LIF%u with format %ux%u%s\n",
+		__func__, pipe_index, cfg->width, cfg->height,
+		pipe->interlaced ? "i" : "");
 
 	mutex_lock(&vsp1->drm->lock);
 
@@ -806,7 +818,7 @@ int vsp1_du_atomic_update(struct device *dev, unsigned int pipe_index,
 	 */
 	fmtinfo = vsp1_get_format_info(vsp1, cfg->pixelformat);
 	if (!fmtinfo) {
-		dev_dbg(vsp1->dev, "Unsupport pixel format %08x for RPF\n",
+		dev_dbg(vsp1->dev, "Unsupported pixel format %08x for RPF\n",
 			cfg->pixelformat);
 		return -EINVAL;
 	}
