@@ -32,9 +32,6 @@
 #define		BW_AUTO_SWITCH_HIGH_LOW			25
 #define		BW_AUTO_SWITCH_LOW_HIGH			30
 
-#define		DM_check_fsync_time_interval				500
-
-
 #define		DM_DIG_BACKOFF				12
 #define		DM_DIG_MAX					0x36
 #define		DM_DIG_MIN					0x1c
@@ -67,10 +64,38 @@
 
 
 /*------------------------------Define structure----------------------------*/
+
+enum dig_algorithm {
+	DIG_ALGO_BY_FALSE_ALARM = 0,
+	DIG_ALGO_BY_RSSI	= 1,
+};
+
+enum dynamic_init_gain_state {
+	DM_STA_DIG_OFF = 0,
+	DM_STA_DIG_ON,
+	DM_STA_DIG_MAX
+};
+
+enum dig_connect {
+	DIG_DISCONNECT = 0,
+	DIG_CONNECT = 1,
+};
+
+enum dig_pkt_detection_threshold {
+	DIG_PD_AT_LOW_POWER = 0,
+	DIG_PD_AT_NORMAL_POWER = 1,
+	DIG_PD_AT_HIGH_POWER = 2,
+};
+
+enum dig_cck_cs_ratio_state {
+	DIG_CS_RATIO_LOWER = 0,
+	DIG_CS_RATIO_HIGHER = 1,
+};
+
 /* 2007/10/04 MH Define upper and lower threshold of DIG enable or disable. */
 struct dig {
 	u8		dig_enable_flag;
-	u8		dig_algorithm;
+	enum dig_algorithm		dig_algorithm;
 	u8		dbg_mode;
 	u8		dig_algorithm_switch;
 
@@ -80,15 +105,15 @@ struct dig {
 	long		rssi_high_power_lowthresh;
 	long		rssi_high_power_highthresh;
 
-	u8		dig_state;
-	u8		dig_highpwr_state;
-	u8		cur_connect_state;
-	u8		pre_connect_state;
+	enum dynamic_init_gain_state		dig_state;
+	enum dynamic_init_gain_state		dig_highpwr_state;
+	enum dig_connect		cur_connect_state;
+	enum dig_connect		pre_connect_state;
 
-	u8		curpd_thstate;
-	u8		prepd_thstate;
-	u8		curcs_ratio_state;
-	u8		precs_ratio_state;
+	enum dig_pkt_detection_threshold		curpd_thstate;
+	enum dig_pkt_detection_threshold		prepd_thstate;
+	enum dig_cck_cs_ratio_state		curcs_ratio_state;
+	enum dig_cck_cs_ratio_state		precs_ratio_state;
 
 	u32		pre_ig_value;
 	u32		cur_ig_value;
@@ -101,73 +126,15 @@ struct dig {
 	long		rssi_val;
 };
 
-typedef enum tag_dynamic_init_gain_state_definition {
-	DM_STA_DIG_OFF = 0,
-	DM_STA_DIG_ON,
-	DM_STA_DIG_MAX
-} dm_dig_sta_e;
+enum cck_rx_path_method {
+	CCK_Rx_Version_1 = 0,
+	CCK_Rx_Version_2 = 1,
+};
 
-
-/* 2007/10/08 MH Define RATR state. */
-typedef enum tag_dynamic_ratr_state_definition {
-	DM_RATR_STA_HIGH = 0,
-	DM_RATR_STA_MIDDLE = 1,
-	DM_RATR_STA_LOW = 2,
-	DM_RATR_STA_MAX
-} dm_ratr_sta_e;
-
-/* 2007/10/11 MH Define DIG operation type. */
-typedef enum tag_dynamic_init_gain_operation_type_definition {
-	DIG_TYPE_THRESH_HIGH	= 0,
-	DIG_TYPE_THRESH_LOW	= 1,
-	DIG_TYPE_THRESH_HIGHPWR_HIGH	= 2,
-	DIG_TYPE_THRESH_HIGHPWR_LOW	= 3,
-	DIG_TYPE_DBG_MODE				= 4,
-	DIG_TYPE_RSSI						= 5,
-	DIG_TYPE_ALGORITHM				= 6,
-	DIG_TYPE_BACKOFF					= 7,
-	DIG_TYPE_PWDB_FACTOR			= 8,
-	DIG_TYPE_RX_GAIN_MIN				= 9,
-	DIG_TYPE_RX_GAIN_MAX				= 10,
-	DIG_TYPE_ENABLE			= 20,
-	DIG_TYPE_DISABLE		= 30,
-	DIG_OP_TYPE_MAX
-} dm_dig_op_e;
-
-typedef enum tag_dig_algorithm_definition {
-	DIG_ALGO_BY_FALSE_ALARM = 0,
-	DIG_ALGO_BY_RSSI	= 1,
-	DIG_ALGO_MAX
-} dm_dig_alg_e;
-
-typedef enum tag_dig_dbgmode_definition {
-	DIG_DBG_OFF = 0,
-	DIG_DBG_ON = 1,
-	DIG_DBG_MAX
-} dm_dig_dbg_e;
-
-typedef enum tag_dig_connect_definition {
-	DIG_DISCONNECT = 0,
-	DIG_CONNECT = 1,
-	DIG_CONNECT_MAX
-} dm_dig_connect_e;
-
-typedef enum tag_dig_packetdetection_threshold_definition {
-	DIG_PD_AT_LOW_POWER = 0,
-	DIG_PD_AT_NORMAL_POWER = 1,
-	DIG_PD_AT_HIGH_POWER = 2,
-	DIG_PD_MAX
-} dm_dig_pd_th_e;
-
-typedef enum tag_dig_cck_cs_ratio_state_definition {
-	DIG_CS_RATIO_LOWER = 0,
-	DIG_CS_RATIO_HIGHER = 1,
-	DIG_CS_MAX
-} dm_dig_cs_ratio_e;
 struct dynamic_rx_path_sel {
 	u8		Enable;
 	u8		DbgMode;
-	u8		cck_method;
+	enum cck_rx_path_method		cck_method;
 	u8		cck_Rx_path;
 
 	u8		SS_TH_low;
@@ -179,12 +146,6 @@ struct dynamic_rx_path_sel {
 	u8		rf_enable_rssi_th[4];
 	long		cck_pwdb_sta[4];
 };
-
-typedef enum tag_CCK_Rx_Path_Method_Definition {
-	CCK_Rx_Version_1 = 0,
-	CCK_Rx_Version_2 = 1,
-	CCK_Rx_Version_MAX
-} DM_CCK_Rx_Path_Method;
 
 typedef enum tag_DM_DbgMode_Definition {
 	DM_DBG_OFF = 0,
@@ -220,8 +181,6 @@ void init_rate_adaptive(struct net_device *dev);
 void dm_txpower_trackingcallback(struct work_struct *work);
 void dm_restore_dynamic_mechanism_state(struct net_device *dev);
 void dm_backup_dynamic_mechanism_state(struct net_device *dev);
-void dm_change_dynamic_initgain_thresh(struct net_device *dev,
-				       u32 dm_type, u32 dm_value);
 void dm_force_tx_fw_info(struct net_device *dev,
 			 u32 force_type, u32 force_value);
 void dm_init_edca_turbo(struct net_device *dev);
