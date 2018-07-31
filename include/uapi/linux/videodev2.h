@@ -636,6 +636,7 @@ struct v4l2_pix_format {
 #define V4L2_PIX_FMT_VP8      v4l2_fourcc('V', 'P', '8', '0') /* VP8 */
 #define V4L2_PIX_FMT_VP9      v4l2_fourcc('V', 'P', '9', '0') /* VP9 */
 #define V4L2_PIX_FMT_HEVC     v4l2_fourcc('H', 'E', 'V', 'C') /* HEVC aka H.265 */
+#define V4L2_PIX_FMT_FWHT     v4l2_fourcc('F', 'W', 'H', 'T') /* Fast Walsh Hadamard Transform (vicodec) */
 
 /*  Vendor-specific formats   */
 #define V4L2_PIX_FMT_CPIA1    v4l2_fourcc('C', 'P', 'I', 'A') /* cpia1 YUV */
@@ -2310,7 +2311,6 @@ struct v4l2_create_buffers {
  *
  */
 #define VIDIOC_QUERYCAP		 _IOR('V',  0, struct v4l2_capability)
-#define VIDIOC_RESERVED		  _IO('V',  1)
 #define VIDIOC_ENUM_FMT         _IOWR('V',  2, struct v4l2_fmtdesc)
 #define VIDIOC_G_FMT		_IOWR('V',  4, struct v4l2_format)
 #define VIDIOC_S_FMT		_IOWR('V',  5, struct v4l2_format)
