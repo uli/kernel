@@ -96,6 +96,7 @@
 #define VNMC_IM_ODD_EVEN	(1 << 3)
 #define VNMC_IM_EVEN		(2 << 3)
 #define VNMC_IM_FULL		(3 << 3)
+#define VNMC_IM_MASK		0x18
 #define VNMC_BPS		(1 << 1)
 #define VNMC_ME			(1 << 0)
 
@@ -636,6 +637,8 @@ static int rvin_setup(struct rvin_dev *vin)
 	case V4L2_FIELD_INTERLACED_BT:
 		vnmc = VNMC_IM_FULL | VNMC_FOC;
 		break;
+	case V4L2_FIELD_SEQ_TB:
+	case V4L2_FIELD_SEQ_BT:
 	case V4L2_FIELD_NONE:
 		vnmc = VNMC_IM_ODD_EVEN;
 		progressive = true;
@@ -829,33 +832,55 @@ static void rvin_fill_hw_slot(struct rvin_dev *vin, int slot)
 	struct rvin_buffer *buf;
 	struct vb2_v4l2_buffer *vbuf;
 	dma_addr_t phys_addr;
+	int prev;
 
 	/* A already populated slot shall never be overwritten. */
-	if (WARN_ON(vin->queue_buf[slot] != NULL))
+	if (WARN_ON(vin->buf_hw[slot].buffer != NULL))
 		return;
 
-	vin_dbg(vin, "Filling HW slot: %d\n", slot);
+	prev = (slot == 0 ? HW_BUFFER_NUM : slot) - 1;
 
-	if (list_empty(&vin->buf_list)) {
-		vin->queue_buf[slot] = NULL;
+	if (vin->buf_hw[prev].type == HALF_TOP) {
+		vbuf = vin->buf_hw[prev].buffer;
+		vin->buf_hw[slot].buffer = vbuf;
+		vin->buf_hw[slot].type = HALF_BOTTOM;
+
+		phys_addr = vin->buf_hw[prev].phys + vin->format.sizeimage / 2;
+	} else if (list_empty(&vin->buf_list)) {
+		vin->buf_hw[slot].buffer = NULL;
+		vin->buf_hw[slot].type = FULL;
 		phys_addr = vin->scratch_phys;
 	} else {
 		/* Keep track of buffer we give to HW */
 		buf = list_entry(vin->buf_list.next, struct rvin_buffer, list);
 		vbuf = &buf->vb;
 		list_del_init(to_buf_list(vbuf));
-		vin->queue_buf[slot] = vbuf;
+		vin->buf_hw[slot].buffer = vbuf;
+
+		vin->buf_hw[slot].type =
+			vin->format.field == V4L2_FIELD_SEQ_TB ||
+			vin->format.field == V4L2_FIELD_SEQ_BT ?
+			HALF_TOP : FULL;
 
 		/* Setup DMA */
 		phys_addr = vb2_dma_contig_plane_dma_addr(&vbuf->vb2_buf, 0);
 	}
 
+	vin_dbg(vin, "Filling HW slot: %d type: %d buffer: %p\n",
+		slot, vin->buf_hw[slot].type, vin->buf_hw[slot].buffer);
+
+	vin->buf_hw[slot].phys = phys_addr;
 	rvin_set_slot_addr(vin, slot, phys_addr);
 }
 
 static int rvin_capture_start(struct rvin_dev *vin)
 {
 	int slot, ret;
+
+	for (slot = 0; slot < HW_BUFFER_NUM; slot++) {
+		vin->buf_hw[slot].buffer = NULL;
+		vin->buf_hw[slot].type = FULL;
+	}
 
 	for (slot = 0; slot < HW_BUFFER_NUM; slot++)
 		rvin_fill_hw_slot(vin, slot);
@@ -940,13 +965,28 @@ static irqreturn_t rvin_irq(int irq, void *data)
 	}
 
 	/* Capture frame */
-	if (vin->queue_buf[slot]) {
-		vin->queue_buf[slot]->field = vin->format.field;
-		vin->queue_buf[slot]->sequence = vin->sequence;
-		vin->queue_buf[slot]->vb2_buf.timestamp = ktime_get_ns();
-		vb2_buffer_done(&vin->queue_buf[slot]->vb2_buf,
+	if (vin->buf_hw[slot].buffer) {
+		/*
+		 * Nothing to do but refill the hardware slot if
+		 * capture only filled half vb2 buffer.
+		 */
+		if (vin->buf_hw[slot].type == HALF_TOP) {
+			vin_dbg(vin, "Half frame %u from slot %d\n",
+				vin->sequence, slot);
+			vin->buf_hw[slot].buffer = NULL;
+			rvin_fill_hw_slot(vin, slot);
+			goto done;
+		}
+
+		vin_dbg(vin, "Capture frame %u from slot %d\n",
+			vin->sequence, slot);
+
+		vin->buf_hw[slot].buffer->field = vin->format.field;
+		vin->buf_hw[slot].buffer->sequence = vin->sequence;
+		vin->buf_hw[slot].buffer->vb2_buf.timestamp = ktime_get_ns();
+		vb2_buffer_done(&vin->buf_hw[slot].buffer->vb2_buf,
 				VB2_BUF_STATE_DONE);
-		vin->queue_buf[slot] = NULL;
+		vin->buf_hw[slot].buffer = NULL;
 	} else {
 		/* Scratch buffer was used, dropping frame. */
 		vin_dbg(vin, "Dropping frame %u\n", vin->sequence);
@@ -967,13 +1007,28 @@ static void return_all_buffers(struct rvin_dev *vin,
 			       enum vb2_buffer_state state)
 {
 	struct rvin_buffer *buf, *node;
-	int i;
+	struct vb2_v4l2_buffer *prev[HW_BUFFER_NUM];
+	unsigned int i, n;
 
 	for (i = 0; i < HW_BUFFER_NUM; i++) {
-		if (vin->queue_buf[i]) {
-			vb2_buffer_done(&vin->queue_buf[i]->vb2_buf,
-					state);
-			vin->queue_buf[i] = NULL;
+		if (vin->buf_hw[i].buffer) {
+			/*
+			 * If capturing SEQ_TB/BT the vb2 buffer is referenced
+			 * twice, once for each part of the capture. Guard
+			 * aginst returning the same buffer twice.
+			 */
+
+			for (n = 0; n < i; n++)
+				if (vin->buf_hw[i].buffer == prev[n])
+					break;
+			if (n == i)
+				vb2_buffer_done(&vin->buf_hw[i].buffer->vb2_buf,
+						state);
+
+
+			prev[i] = vin->buf_hw[i].buffer;
+
+			vin->buf_hw[i].buffer = NULL;
 		}
 	}
 
@@ -1277,7 +1332,7 @@ int rvin_dma_register(struct rvin_dev *vin, int irq)
 	vin->state = STOPPED;
 
 	for (i = 0; i < HW_BUFFER_NUM; i++)
-		vin->queue_buf[i] = NULL;
+		vin->buf_hw[i].buffer = NULL;
 
 	/* buffer queue */
 	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
