@@ -14,6 +14,7 @@
 #include <linux/of_device.h>
 #include <linux/of_graph.h>
 #include <linux/platform_device.h>
+#include <linux/reset.h>
 #include <linux/slab.h>
 
 #include <drm/drm_atomic.h>
@@ -55,6 +56,7 @@ struct rcar_lvds {
 
 	void __iomem *mmio;
 	struct clk *clock;
+	struct reset_control *rst;
 	bool enabled;
 
 	struct drm_display_mode display_mode;
@@ -385,6 +387,12 @@ static void rcar_lvds_enable(struct drm_bridge *bridge)
 	if (ret < 0)
 		return;
 
+	ret = reset_control_deassert(lvds->rst);
+	if (ret < 0) {
+		clk_disable_unprepare(lvds->clock);
+		return;
+	}
+
 	/*
 	 * Hardcode the channels and control signals routing for now.
 	 *
@@ -476,6 +484,7 @@ static void rcar_lvds_disable(struct drm_bridge *bridge)
 	rcar_lvds_write(lvds, LVDCR1, 0);
 	rcar_lvds_write(lvds, LVDPLLCR, 0);
 
+	reset_control_assert(lvds->rst);
 	clk_disable_unprepare(lvds->clock);
 
 	lvds->enabled = false;
@@ -690,6 +699,12 @@ static int rcar_lvds_probe(struct platform_device *pdev)
 	if (IS_ERR(lvds->clock)) {
 		dev_err(&pdev->dev, "failed to get clock\n");
 		return PTR_ERR(lvds->clock);
+	}
+
+	lvds->rst = devm_reset_control_get_optional_exclusive(&pdev->dev, NULL);
+	if (IS_ERR(lvds->rst)) {
+		dev_err(&pdev->dev, "failed to get reset\n");
+		return PTR_ERR(lvds->rst);
 	}
 
 	drm_bridge_add(&lvds->bridge);
