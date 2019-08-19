@@ -1,15 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  * net/sched/act_mirred.c	packet mirroring and redirect actions
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Jamal Hadi Salim (2002-4)
  *
  * TODO: Add ingress support (and socket redirect support)
- *
  */
 
 #include <linux/types.h>
@@ -31,6 +26,9 @@
 
 static LIST_HEAD(mirred_list);
 static DEFINE_SPINLOCK(mirred_list_lock);
+
+#define MIRRED_RECURSION_LIMIT    4
+static DEFINE_PER_CPU(unsigned int, mirred_rec_level);
 
 static bool tcf_mirred_is_act_redirect(int action)
 {
@@ -94,10 +92,12 @@ static struct tc_action_ops act_mirred_ops;
 static int tcf_mirred_init(struct net *net, struct nlattr *nla,
 			   struct nlattr *est, struct tc_action **a,
 			   int ovr, int bind, bool rtnl_held,
+			   struct tcf_proto *tp,
 			   struct netlink_ext_ack *extack)
 {
 	struct tc_action_net *tn = net_generic(net, mirred_net_id);
 	struct nlattr *tb[TCA_MIRRED_MAX + 1];
+	struct tcf_chain *goto_ch = NULL;
 	bool mac_header_xmit = false;
 	struct tc_mirred *parm;
 	struct tcf_mirred *m;
@@ -109,7 +109,8 @@ static int tcf_mirred_init(struct net *net, struct nlattr *nla,
 		NL_SET_ERR_MSG_MOD(extack, "Mirred requires attributes to be passed");
 		return -EINVAL;
 	}
-	ret = nla_parse_nested(tb, TCA_MIRRED_MAX, nla, mirred_policy, extack);
+	ret = nla_parse_nested_deprecated(tb, TCA_MIRRED_MAX, nla,
+					  mirred_policy, extack);
 	if (ret < 0)
 		return ret;
 	if (!tb[TCA_MIRRED_PARMS]) {
@@ -157,18 +158,23 @@ static int tcf_mirred_init(struct net *net, struct nlattr *nla,
 		tcf_idr_release(*a, bind);
 		return -EEXIST;
 	}
+
 	m = to_mirred(*a);
+	if (ret == ACT_P_CREATED)
+		INIT_LIST_HEAD(&m->tcfm_list);
+
+	err = tcf_action_check_ctrlact(parm->action, tp, &goto_ch, extack);
+	if (err < 0)
+		goto release_idr;
 
 	spin_lock_bh(&m->tcf_lock);
-	m->tcf_action = parm->action;
-	m->tcfm_eaction = parm->eaction;
 
 	if (parm->ifindex) {
 		dev = dev_get_by_index(net, parm->ifindex);
 		if (!dev) {
 			spin_unlock_bh(&m->tcf_lock);
-			tcf_idr_release(*a, bind);
-			return -ENODEV;
+			err = -ENODEV;
+			goto put_chain;
 		}
 		mac_header_xmit = dev_is_mac_header_xmit(dev);
 		rcu_swap_protected(m->tcfm_dev, dev,
@@ -177,7 +183,11 @@ static int tcf_mirred_init(struct net *net, struct nlattr *nla,
 			dev_put(dev);
 		m->tcfm_mac_header_xmit = mac_header_xmit;
 	}
+	goto_ch = tcf_action_set_ctrlact(*a, parm->action, goto_ch);
+	m->tcfm_eaction = parm->eaction;
 	spin_unlock_bh(&m->tcf_lock);
+	if (goto_ch)
+		tcf_chain_put_by_act(goto_ch);
 
 	if (ret == ACT_P_CREATED) {
 		spin_lock(&mirred_list_lock);
@@ -188,6 +198,12 @@ static int tcf_mirred_init(struct net *net, struct nlattr *nla,
 	}
 
 	return ret;
+put_chain:
+	if (goto_ch)
+		tcf_chain_put_by_act(goto_ch);
+release_idr:
+	tcf_idr_release(*a, bind);
+	return err;
 }
 
 static int tcf_mirred_act(struct sk_buff *skb, const struct tc_action *a,
@@ -197,12 +213,21 @@ static int tcf_mirred_act(struct sk_buff *skb, const struct tc_action *a,
 	struct sk_buff *skb2 = skb;
 	bool m_mac_header_xmit;
 	struct net_device *dev;
+	unsigned int rec_level;
 	int retval, err = 0;
 	bool use_reinsert;
 	bool want_ingress;
 	bool is_redirect;
 	int m_eaction;
 	int mac_len;
+
+	rec_level = __this_cpu_inc_return(mirred_rec_level);
+	if (unlikely(rec_level > MIRRED_RECURSION_LIMIT)) {
+		net_warn_ratelimited("Packet exceeded mirred recursion limit on dev %s\n",
+				     netdev_name(skb->dev));
+		__this_cpu_dec(mirred_rec_level);
+		return TC_ACT_SHOT;
+	}
 
 	tcf_lastuse_update(&m->tcf_tm);
 	bstats_cpu_update(this_cpu_ptr(m->common.cpu_bstats), skb);
@@ -264,7 +289,9 @@ static int tcf_mirred_act(struct sk_buff *skb, const struct tc_action *a,
 		if (use_reinsert) {
 			res->ingress = want_ingress;
 			res->qstats = this_cpu_ptr(m->common.cpu_qstats);
-			return TC_ACT_REINSERT;
+			skb_tc_reinsert(skb, res);
+			__this_cpu_dec(mirred_rec_level);
+			return TC_ACT_CONSUMED;
 		}
 	}
 
@@ -279,6 +306,7 @@ out:
 		if (tcf_mirred_is_act_redirect(m_eaction))
 			retval = TC_ACT_SHOT;
 	}
+	__this_cpu_dec(mirred_rec_level);
 
 	return retval;
 }
@@ -398,6 +426,11 @@ static void tcf_mirred_put_dev(struct net_device *dev)
 	dev_put(dev);
 }
 
+static size_t tcf_mirred_get_fill_size(const struct tc_action *act)
+{
+	return nla_total_size(sizeof(struct tc_mirred));
+}
+
 static struct tc_action_ops act_mirred_ops = {
 	.kind		=	"mirred",
 	.id		=	TCA_ID_MIRRED,
@@ -409,6 +442,7 @@ static struct tc_action_ops act_mirred_ops = {
 	.init		=	tcf_mirred_init,
 	.walk		=	tcf_mirred_walker,
 	.lookup		=	tcf_mirred_search,
+	.get_fill_size	=	tcf_mirred_get_fill_size,
 	.size		=	sizeof(struct tcf_mirred),
 	.get_dev	=	tcf_mirred_get_dev,
 	.put_dev	=	tcf_mirred_put_dev,

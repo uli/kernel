@@ -102,6 +102,8 @@ static int i40e_xsk_umem_enable(struct i40e_vsi *vsi, struct xdp_umem *umem,
 	if (err)
 		return err;
 
+	set_bit(qid, vsi->af_xdp_zc_qps);
+
 	if_running = netif_running(vsi->netdev) && i40e_enabled_xdp_vsi(vsi);
 
 	if (if_running) {
@@ -148,6 +150,7 @@ static int i40e_xsk_umem_disable(struct i40e_vsi *vsi, u16 qid)
 			return err;
 	}
 
+	clear_bit(qid, vsi->af_xdp_zc_qps);
 	i40e_xsk_umem_dma_unmap(vsi, umem);
 
 	if (if_running) {
@@ -212,6 +215,7 @@ static int i40e_run_xdp_zc(struct i40e_ring *rx_ring, struct xdp_buff *xdp)
 		break;
 	default:
 		bpf_warn_invalid_xdp_action(act);
+		/* fall through */
 	case XDP_ABORTED:
 		trace_xdp_exception(rx_ring->netdev, xdp_prog, act);
 		/* fallthrough -- handle aborts by dropping packet */
@@ -637,8 +641,8 @@ static bool i40e_xmit_zc(struct i40e_ring *xdp_ring, unsigned int budget)
 	struct i40e_tx_desc *tx_desc = NULL;
 	struct i40e_tx_buffer *tx_bi;
 	bool work_done = true;
+	struct xdp_desc desc;
 	dma_addr_t dma;
-	u32 len;
 
 	while (budget-- > 0) {
 		if (!unlikely(I40E_DESC_UNUSED(xdp_ring))) {
@@ -647,21 +651,23 @@ static bool i40e_xmit_zc(struct i40e_ring *xdp_ring, unsigned int budget)
 			break;
 		}
 
-		if (!xsk_umem_consume_tx(xdp_ring->xsk_umem, &dma, &len))
+		if (!xsk_umem_consume_tx(xdp_ring->xsk_umem, &desc))
 			break;
 
-		dma_sync_single_for_device(xdp_ring->dev, dma, len,
+		dma = xdp_umem_get_dma(xdp_ring->xsk_umem, desc.addr);
+
+		dma_sync_single_for_device(xdp_ring->dev, dma, desc.len,
 					   DMA_BIDIRECTIONAL);
 
 		tx_bi = &xdp_ring->tx_bi[xdp_ring->next_to_use];
-		tx_bi->bytecount = len;
+		tx_bi->bytecount = desc.len;
 
 		tx_desc = I40E_TX_DESC(xdp_ring, xdp_ring->next_to_use);
 		tx_desc->buffer_addr = cpu_to_le64(dma);
 		tx_desc->cmd_type_offset_bsz =
 			build_ctob(I40E_TX_DESC_CMD_ICRC
 				   | I40E_TX_DESC_CMD_EOP,
-				   0, len, 0);
+				   0, desc.len, 0);
 
 		xdp_ring->next_to_use++;
 		if (xdp_ring->next_to_use == xdp_ring->count)

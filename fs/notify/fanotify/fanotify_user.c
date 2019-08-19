@@ -208,6 +208,7 @@ static int copy_fid_to_user(struct fanotify_event *event, char __user *buf)
 {
 	struct fanotify_event_info_fid info = { };
 	struct file_handle handle = { };
+	unsigned char bounce[FANOTIFY_INLINE_FH_LEN], *fh;
 	size_t fh_len = event->fh_len;
 	size_t len = fanotify_event_info_len(event);
 
@@ -233,7 +234,16 @@ static int copy_fid_to_user(struct fanotify_event *event, char __user *buf)
 
 	buf += sizeof(handle);
 	len -= sizeof(handle);
-	if (copy_to_user(buf, fanotify_event_fh(event), fh_len))
+	/*
+	 * For an inline fh, copy through stack to exclude the copy from
+	 * usercopy hardening protections.
+	 */
+	fh = fanotify_event_fh(event);
+	if (fh_len <= FANOTIFY_INLINE_FH_LEN) {
+		memcpy(bounce, fh, fh_len);
+		fh = bounce;
+	}
+	if (copy_to_user(buf, fh, fh_len))
 		return -EFAULT;
 
 	/* Pad with 0's */
@@ -910,6 +920,22 @@ static int fanotify_test_fid(struct path *path, __kernel_fsid_t *fsid)
 	return 0;
 }
 
+static int fanotify_events_supported(struct path *path, __u64 mask)
+{
+	/*
+	 * Some filesystems such as 'proc' acquire unusual locks when opening
+	 * files. For them fanotify permission events have high chances of
+	 * deadlocking the system - open done when reporting fanotify event
+	 * blocks on this "unusual" lock while another process holding the lock
+	 * waits for fanotify permission event to be answered. Just disallow
+	 * permission events for such filesystems.
+	 */
+	if (mask & FANOTIFY_PERM_EVENTS &&
+	    path->mnt->mnt_sb->s_type->fs_flags & FS_DISALLOW_NOTIFY_PERM)
+		return -EINVAL;
+	return 0;
+}
+
 static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 			    int dfd, const char  __user *pathname)
 {
@@ -1007,6 +1033,12 @@ static int do_fanotify_mark(int fanotify_fd, unsigned int flags, __u64 mask,
 	ret = fanotify_find_path(dfd, pathname, &path, flags);
 	if (ret)
 		goto fput_and_out;
+
+	if (flags & FAN_MARK_ADD) {
+		ret = fanotify_events_supported(&path, mask);
+		if (ret)
+			goto path_put_and_out;
+	}
 
 	if (FAN_GROUP_FLAG(group, FAN_REPORT_FID)) {
 		ret = fanotify_test_fid(&path, &__fsid);

@@ -208,6 +208,26 @@ int tls_push_partial_record(struct sock *sk, struct tls_context *ctx,
 	return tls_push_sg(sk, ctx, sg, offset, flags);
 }
 
+bool tls_free_partial_record(struct sock *sk, struct tls_context *ctx)
+{
+	struct scatterlist *sg;
+
+	sg = ctx->partially_sent_record;
+	if (!sg)
+		return false;
+
+	while (1) {
+		put_page(sg_page(sg));
+		sk_mem_uncharge(sk, sg->length);
+
+		if (sg_is_last(sg))
+			break;
+		sg++;
+	}
+	ctx->partially_sent_record = NULL;
+	return true;
+}
+
 static void tls_write_space(struct sock *sk)
 {
 	struct tls_context *ctx = tls_get_ctx(sk);
@@ -231,7 +251,7 @@ static void tls_write_space(struct sock *sk)
 	ctx->sk_write_space(sk);
 }
 
-static void tls_ctx_free(struct tls_context *ctx)
+void tls_ctx_free(struct tls_context *ctx)
 {
 	if (!ctx)
 		return;
@@ -259,7 +279,8 @@ static void tls_sk_proto_close(struct sock *sk, long timeout)
 		goto skip_tx_cleanup;
 	}
 
-	if (!tls_complete_pending_work(sk, ctx, 0, &timeo))
+	if (unlikely(sk->sk_write_pending) &&
+	    !wait_on_pending_writer(sk, &timeo))
 		tls_handle_open_record(sk, 0);
 
 	/* We need these for tls_sw_fallback handling of other packets */
@@ -267,13 +288,14 @@ static void tls_sk_proto_close(struct sock *sk, long timeout)
 		kfree(ctx->tx.rec_seq);
 		kfree(ctx->tx.iv);
 		tls_sw_free_resources_tx(sk);
+#ifdef CONFIG_TLS_DEVICE
+	} else if (ctx->tx_conf == TLS_HW) {
+		tls_device_free_resources_tx(sk);
+#endif
 	}
 
-	if (ctx->rx_conf == TLS_SW) {
-		kfree(ctx->rx.rec_seq);
-		kfree(ctx->rx.iv);
+	if (ctx->rx_conf == TLS_SW)
 		tls_sw_free_resources_rx(sk);
-	}
 
 #ifdef CONFIG_TLS_DEVICE
 	if (ctx->rx_conf == TLS_HW)
@@ -469,24 +491,29 @@ static int do_tls_setsockopt_conf(struct sock *sk, char __user *optval,
 
 	switch (crypto_info->cipher_type) {
 	case TLS_CIPHER_AES_GCM_128:
+		optsize = sizeof(struct tls12_crypto_info_aes_gcm_128);
+		break;
 	case TLS_CIPHER_AES_GCM_256: {
-		optsize = crypto_info->cipher_type == TLS_CIPHER_AES_GCM_128 ?
-			sizeof(struct tls12_crypto_info_aes_gcm_128) :
-			sizeof(struct tls12_crypto_info_aes_gcm_256);
-		if (optlen != optsize) {
-			rc = -EINVAL;
-			goto err_crypto_info;
-		}
-		rc = copy_from_user(crypto_info + 1, optval + sizeof(*crypto_info),
-				    optlen - sizeof(*crypto_info));
-		if (rc) {
-			rc = -EFAULT;
-			goto err_crypto_info;
-		}
+		optsize = sizeof(struct tls12_crypto_info_aes_gcm_256);
 		break;
 	}
+	case TLS_CIPHER_AES_CCM_128:
+		optsize = sizeof(struct tls12_crypto_info_aes_ccm_128);
+		break;
 	default:
 		rc = -EINVAL;
+		goto err_crypto_info;
+	}
+
+	if (optlen != optsize) {
+		rc = -EINVAL;
+		goto err_crypto_info;
+	}
+
+	rc = copy_from_user(crypto_info + 1, optval + sizeof(*crypto_info),
+			    optlen - sizeof(*crypto_info));
+	if (rc) {
+		rc = -EFAULT;
 		goto err_crypto_info;
 	}
 
@@ -616,7 +643,7 @@ static void tls_hw_sk_destruct(struct sock *sk)
 
 	ctx->sk_destruct(sk);
 	/* Free ctx */
-	kfree(ctx);
+	tls_ctx_free(ctx);
 	icsk->icsk_ulp_data = NULL;
 }
 

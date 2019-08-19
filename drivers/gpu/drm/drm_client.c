@@ -15,10 +15,10 @@
 #include <drm/drm_drv.h>
 #include <drm/drm_file.h>
 #include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
 #include <drm/drm_gem.h>
 #include <drm/drm_mode.h>
 #include <drm/drm_print.h>
-#include <drm/drmP.h>
 
 #include "drm_crtc_internal.h"
 #include "drm_internal.h"
@@ -27,7 +27,6 @@
  * DOC: overview
  *
  * This library provides support for clients running in the kernel like fbdev and bootsplash.
- * Currently it's only partially implemented, just enough to support fbdev.
  *
  * GEM drivers which provide a GEM based dumb buffer with a virtual address are supported.
  */
@@ -69,7 +68,8 @@ EXPORT_SYMBOL(drm_client_close);
  * @name: Client name
  * @funcs: DRM client functions (optional)
  *
- * This initialises the client and opens a &drm_file. Use drm_client_add() to complete the process.
+ * This initialises the client and opens a &drm_file.
+ * Use drm_client_register() to complete the process.
  * The caller needs to hold a reference on @dev before calling this function.
  * The client is freed when the &drm_device is unregistered. See drm_client_release().
  *
@@ -91,14 +91,20 @@ int drm_client_init(struct drm_device *dev, struct drm_client_dev *client,
 	client->name = name;
 	client->funcs = funcs;
 
-	ret = drm_client_open(client);
+	ret = drm_client_modeset_create(client);
 	if (ret)
 		goto err_put_module;
+
+	ret = drm_client_open(client);
+	if (ret)
+		goto err_free;
 
 	drm_dev_get(dev);
 
 	return 0;
 
+err_free:
+	drm_client_modeset_free(client);
 err_put_module:
 	if (funcs)
 		module_put(funcs->owner);
@@ -108,16 +114,16 @@ err_put_module:
 EXPORT_SYMBOL(drm_client_init);
 
 /**
- * drm_client_add - Add client to the device list
+ * drm_client_register - Register client
  * @client: DRM client
  *
  * Add the client to the &drm_device client list to activate its callbacks.
  * @client must be initialized by a call to drm_client_init(). After
- * drm_client_add() it is no longer permissible to call drm_client_release()
+ * drm_client_register() it is no longer permissible to call drm_client_release()
  * directly (outside the unregister callback), instead cleanup will happen
  * automatically on driver unload.
  */
-void drm_client_add(struct drm_client_dev *client)
+void drm_client_register(struct drm_client_dev *client)
 {
 	struct drm_device *dev = client->dev;
 
@@ -125,7 +131,7 @@ void drm_client_add(struct drm_client_dev *client)
 	list_add(&client->list, &dev->clientlist);
 	mutex_unlock(&dev->clientlist_mutex);
 }
-EXPORT_SYMBOL(drm_client_add);
+EXPORT_SYMBOL(drm_client_register);
 
 /**
  * drm_client_release - Release DRM client resources
@@ -147,6 +153,7 @@ void drm_client_release(struct drm_client_dev *client)
 
 	DRM_DEV_DEBUG_KMS(dev->dev, "%s\n", client->name);
 
+	drm_client_modeset_free(client);
 	drm_client_close(client);
 	drm_dev_put(dev);
 	if (client->funcs)
@@ -242,6 +249,7 @@ static void drm_client_buffer_delete(struct drm_client_buffer *buffer)
 static struct drm_client_buffer *
 drm_client_buffer_create(struct drm_client_dev *client, u32 width, u32 height, u32 format)
 {
+	const struct drm_format_info *info = drm_format_info(format);
 	struct drm_mode_create_dumb dumb_args = { };
 	struct drm_device *dev = client->dev;
 	struct drm_client_buffer *buffer;
@@ -257,7 +265,7 @@ drm_client_buffer_create(struct drm_client_dev *client, u32 width, u32 height, u
 
 	dumb_args.width = width;
 	dumb_args.height = height;
-	dumb_args.bpp = drm_format_plane_cpp(format, 0) * 8;
+	dumb_args.bpp = info->cpp[0] * 8;
 	ret = drm_mode_create_dumb(dev, &dumb_args, client->file);
 	if (ret)
 		goto err_delete;

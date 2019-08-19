@@ -24,6 +24,11 @@ u32 nvmet_get_log_page_len(struct nvme_command *cmd)
 	return len;
 }
 
+u64 nvmet_get_log_page_offset(struct nvme_command *cmd)
+{
+	return le64_to_cpu(cmd->get_log_page.lpo);
+}
+
 static void nvmet_execute_get_log_page_noop(struct nvmet_req *req)
 {
 	nvmet_req_complete(req, nvmet_zero_sgl(req, 0, req->data_len));
@@ -436,6 +441,9 @@ static void nvmet_execute_identify_ns(struct nvmet_req *req)
 		id->nuse = id->nsze;
 		break;
         }
+
+	if (ns->bdev)
+		nvmet_bdev_set_limits(ns->bdev, id);
 
 	/*
 	 * We just provide a single LBA format that matches what the

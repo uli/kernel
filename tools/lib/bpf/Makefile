@@ -3,7 +3,7 @@
 
 BPF_VERSION = 0
 BPF_PATCHLEVEL = 0
-BPF_EXTRAVERSION = 1
+BPF_EXTRAVERSION = 4
 
 MAKEFLAGS += --no-print-directory
 
@@ -79,8 +79,6 @@ export prefix libdir src obj
 libdir_SQ = $(subst ','\'',$(libdir))
 libdir_relative_SQ = $(subst ','\'',$(libdir_relative))
 
-LIB_FILE = libbpf.a libbpf.so
-
 VERSION		= $(BPF_VERSION)
 PATCHLEVEL	= $(BPF_PATCHLEVEL)
 EXTRAVERSION	= $(BPF_EXTRAVERSION)
@@ -88,7 +86,11 @@ EXTRAVERSION	= $(BPF_EXTRAVERSION)
 OBJ		= $@
 N		=
 
-LIBBPF_VERSION = $(BPF_VERSION).$(BPF_PATCHLEVEL).$(BPF_EXTRAVERSION)
+LIBBPF_VERSION	= $(BPF_VERSION).$(BPF_PATCHLEVEL).$(BPF_EXTRAVERSION)
+
+LIB_TARGET	= libbpf.a libbpf.so.$(LIBBPF_VERSION)
+LIB_FILE	= libbpf.a libbpf.so*
+PC_FILE		= libbpf.pc
 
 # Set compile option CFLAGS
 ifdef EXTRA_CFLAGS
@@ -128,16 +130,19 @@ all:
 export srctree OUTPUT CC LD CFLAGS V
 include $(srctree)/tools/build/Makefile.include
 
-BPF_IN    := $(OUTPUT)libbpf-in.o
-LIB_FILE := $(addprefix $(OUTPUT),$(LIB_FILE))
-VERSION_SCRIPT := libbpf.map
+BPF_IN		:= $(OUTPUT)libbpf-in.o
+VERSION_SCRIPT	:= libbpf.map
+
+LIB_TARGET	:= $(addprefix $(OUTPUT),$(LIB_TARGET))
+LIB_FILE	:= $(addprefix $(OUTPUT),$(LIB_FILE))
+PC_FILE		:= $(addprefix $(OUTPUT),$(PC_FILE))
 
 GLOBAL_SYM_COUNT = $(shell readelf -s --wide $(BPF_IN) | \
 			   awk '/GLOBAL/ && /DEFAULT/ && !/UND/ {s++} END{print s}')
 VERSIONED_SYM_COUNT = $(shell readelf -s --wide $(OUTPUT)libbpf.so | \
 			      grep -Eo '[^ ]+@LIBBPF_' | cut -d@ -f1 | sort -u | wc -l)
 
-CMD_TARGETS = $(LIB_FILE)
+CMD_TARGETS = $(LIB_TARGET) $(PC_FILE)
 
 CXX_TEST_TARGET = $(OUTPUT)test_libbpf
 
@@ -170,15 +175,25 @@ $(BPF_IN): force elfdep bpfdep
 	echo "Warning: Kernel ABI header at 'tools/include/uapi/linux/if_xdp.h' differs from latest version at 'include/uapi/linux/if_xdp.h'" >&2 )) || true
 	$(Q)$(MAKE) $(build)=libbpf
 
-$(OUTPUT)libbpf.so: $(BPF_IN)
-	$(QUIET_LINK)$(CC) --shared -Wl,--version-script=$(VERSION_SCRIPT) \
-		$^ -o $@
+$(OUTPUT)libbpf.so: $(OUTPUT)libbpf.so.$(LIBBPF_VERSION)
+
+$(OUTPUT)libbpf.so.$(LIBBPF_VERSION): $(BPF_IN)
+	$(QUIET_LINK)$(CC) --shared -Wl,-soname,libbpf.so.$(VERSION) \
+				    -Wl,--version-script=$(VERSION_SCRIPT) $^ -lelf -o $@
+	@ln -sf $(@F) $(OUTPUT)libbpf.so
+	@ln -sf $(@F) $(OUTPUT)libbpf.so.$(VERSION)
 
 $(OUTPUT)libbpf.a: $(BPF_IN)
 	$(QUIET_LINK)$(RM) $@; $(AR) rcs $@ $^
 
 $(OUTPUT)test_libbpf: test_libbpf.cpp $(OUTPUT)libbpf.a
 	$(QUIET_LINK)$(CXX) $(INCLUDES) $^ -lelf -o $@
+
+$(OUTPUT)libbpf.pc:
+	$(QUIET_GEN)sed -e "s|@PREFIX@|$(prefix)|" \
+		-e "s|@LIBDIR@|$(libdir_SQ)|" \
+		-e "s|@VERSION@|$(LIBBPF_VERSION)|" \
+		< libbpf.pc.template > $@
 
 check: check_abi
 
@@ -189,8 +204,24 @@ check_abi: $(OUTPUT)libbpf.so
 		     "versioned symbols in $^ ($(VERSIONED_SYM_COUNT))." \
 		     "Please make sure all LIBBPF_API symbols are"	 \
 		     "versioned in $(VERSION_SCRIPT)." >&2;		 \
+		readelf -s --wide $(OUTPUT)libbpf-in.o |		 \
+		    awk '/GLOBAL/ && /DEFAULT/ && !/UND/ {print $$8}'|   \
+		    sort -u > $(OUTPUT)libbpf_global_syms.tmp;		 \
+		readelf -s --wide $(OUTPUT)libbpf.so |			 \
+		    grep -Eo '[^ ]+@LIBBPF_' | cut -d@ -f1 |		 \
+		    sort -u > $(OUTPUT)libbpf_versioned_syms.tmp; 	 \
+		diff -u $(OUTPUT)libbpf_global_syms.tmp			 \
+		     $(OUTPUT)libbpf_versioned_syms.tmp;		 \
+		rm $(OUTPUT)libbpf_global_syms.tmp			 \
+		   $(OUTPUT)libbpf_versioned_syms.tmp;			 \
 		exit 1;							 \
 	fi
+
+define do_install_mkdir
+	if [ ! -d '$(DESTDIR_SQ)$1' ]; then		\
+		$(INSTALL) -d -m 755 '$(DESTDIR_SQ)$1';	\
+	fi
+endef
 
 define do_install
 	if [ ! -d '$(DESTDIR_SQ)$2' ]; then		\
@@ -200,16 +231,23 @@ define do_install
 endef
 
 install_lib: all_cmd
-	$(call QUIET_INSTALL, $(LIB_FILE)) \
-		$(call do_install,$(LIB_FILE),$(libdir_SQ))
+	$(call QUIET_INSTALL, $(LIB_TARGET)) \
+		$(call do_install_mkdir,$(libdir_SQ)); \
+		cp -fpR $(LIB_FILE) $(DESTDIR)$(libdir_SQ)
 
 install_headers:
 	$(call QUIET_INSTALL, headers) \
 		$(call do_install,bpf.h,$(prefix)/include/bpf,644); \
-		$(call do_install,libbpf.h,$(prefix)/include/bpf,644);
-		$(call do_install,btf.h,$(prefix)/include/bpf,644);
+		$(call do_install,libbpf.h,$(prefix)/include/bpf,644); \
+		$(call do_install,btf.h,$(prefix)/include/bpf,644); \
+		$(call do_install,libbpf_util.h,$(prefix)/include/bpf,644); \
+		$(call do_install,xsk.h,$(prefix)/include/bpf,644);
 
-install: install_lib
+install_pkgconfig: $(PC_FILE)
+	$(call QUIET_INSTALL, $(PC_FILE)) \
+		$(call do_install,$(PC_FILE),$(libdir_SQ)/pkgconfig,644)
+
+install: install_lib install_pkgconfig
 
 ### Cleaning rules
 
@@ -219,7 +257,7 @@ config-clean:
 
 clean:
 	$(call QUIET_CLEAN, libbpf) $(RM) $(TARGETS) $(CXX_TEST_TARGET) \
-		*.o *~ *.a *.so .*.d .*.cmd LIBBPF-CFLAGS
+		*.o *~ *.a *.so *.so.$(VERSION) .*.d .*.cmd *.pc LIBBPF-CFLAGS
 	$(call QUIET_CLEAN, core-gen) $(RM) $(OUTPUT)FEATURE-DUMP.libbpf
 
 

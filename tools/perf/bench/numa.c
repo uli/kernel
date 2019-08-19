@@ -11,7 +11,6 @@
 
 #include "../perf.h"
 #include "../builtin.h"
-#include "../util/util.h"
 #include <subcmd/parse-options.h>
 #include "../util/cloexec.h"
 
@@ -35,9 +34,14 @@
 #include <linux/kernel.h>
 #include <linux/time64.h>
 #include <linux/numa.h>
+#include <linux/zalloc.h>
 
 #include <numa.h>
 #include <numaif.h>
+
+#ifndef RUSAGE_THREAD
+# define RUSAGE_THREAD 1
+#endif
 
 /*
  * Regular printout to the terminal, supressed if -q is specified:

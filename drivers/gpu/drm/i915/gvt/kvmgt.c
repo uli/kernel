@@ -905,7 +905,7 @@ static inline bool intel_vgpu_in_aperture(struct intel_vgpu *vgpu, u64 off)
 static int intel_vgpu_aperture_rw(struct intel_vgpu *vgpu, u64 off,
 		void *buf, unsigned long count, bool is_write)
 {
-	void *aperture_va;
+	void __iomem *aperture_va;
 
 	if (!intel_vgpu_in_aperture(vgpu, off) ||
 	    !intel_vgpu_in_aperture(vgpu, off + count)) {
@@ -920,9 +920,9 @@ static int intel_vgpu_aperture_rw(struct intel_vgpu *vgpu, u64 off,
 		return -EIO;
 
 	if (is_write)
-		memcpy(aperture_va + offset_in_page(off), buf, count);
+		memcpy_toio(aperture_va + offset_in_page(off), buf, count);
 	else
-		memcpy(buf, aperture_va + offset_in_page(off), count);
+		memcpy_fromio(buf, aperture_va + offset_in_page(off), count);
 
 	io_mapping_unmap(aperture_va);
 
@@ -1576,7 +1576,7 @@ hw_id_show(struct device *dev, struct device_attribute *attr,
 		struct intel_vgpu *vgpu = (struct intel_vgpu *)
 			mdev_get_drvdata(mdev);
 		return sprintf(buf, "%u\n",
-			       vgpu->submission.shadow_ctx->hw_id);
+			       vgpu->submission.shadow[0]->gem_context->hw_id);
 	}
 	return sprintf(buf, "\n");
 }
