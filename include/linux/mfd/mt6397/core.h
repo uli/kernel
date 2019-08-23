@@ -9,6 +9,8 @@
 
 #include <linux/mutex.h>
 
+#include <linux/notifier.h>
+
 enum chip_id {
 	MT6323_CHIP_ID = 0x23,
 	MT6391_CHIP_ID = 0x91,
@@ -54,6 +56,7 @@ enum mt6397_irq_numbers {
 struct mt6397_chip {
 	struct device *dev;
 	struct regmap *regmap;
+	struct notifier_block pm_nb;
 	int irq;
 	struct irq_domain *irq_domain;
 	struct mutex irqlock;
