@@ -65,29 +65,21 @@ static int drc_pmem_bind(struct papr_scm_priv *p)
 		cond_resched();
 	} while (rc == H_BUSY);
 
-	if (rc) {
-		/* H_OVERLAP needs a separate error path */
-		if (rc == H_OVERLAP)
-			return -EBUSY;
-
-		dev_err(&p->pdev->dev, "bind err: %lld\n", rc);
-		return -ENXIO;
-	}
+	if (rc)
+		return rc;
 
 	p->bound_addr = saved;
-
-	dev_dbg(&p->pdev->dev, "bound drc %x to %pR\n", p->drc_index, &p->res);
-
-	return 0;
+	dev_dbg(&p->pdev->dev, "bound drc 0x%x to %pR\n", p->drc_index, &p->res);
+	return rc;
 }
 
-static int drc_pmem_unbind(struct papr_scm_priv *p)
+static void drc_pmem_unbind(struct papr_scm_priv *p)
 {
 	unsigned long ret[PLPAR_HCALL_BUFSIZE];
 	uint64_t token = 0;
 	int64_t rc;
 
-	dev_dbg(&p->pdev->dev, "unbind drc %x\n", p->drc_index);
+	dev_dbg(&p->pdev->dev, "unbind drc 0x%x\n", p->drc_index);
 
 	/* NB: unbind has the same retry requirements as drc_pmem_bind() */
 	do {
@@ -110,11 +102,47 @@ static int drc_pmem_unbind(struct papr_scm_priv *p)
 	if (rc)
 		dev_err(&p->pdev->dev, "unbind error: %lld\n", rc);
 	else
-		dev_dbg(&p->pdev->dev, "unbind drc %x complete\n",
+		dev_dbg(&p->pdev->dev, "unbind drc 0x%x complete\n",
 			p->drc_index);
 
-	return rc == H_SUCCESS ? 0 : -ENXIO;
+	return;
 }
+
+static int drc_pmem_query_n_bind(struct papr_scm_priv *p)
+{
+	unsigned long start_addr;
+	unsigned long end_addr;
+	unsigned long ret[PLPAR_HCALL_BUFSIZE];
+	int64_t rc;
+
+
+	rc = plpar_hcall(H_SCM_QUERY_BLOCK_MEM_BINDING, ret,
+			 p->drc_index, 0);
+	if (rc)
+		goto err_out;
+	start_addr = ret[0];
+
+	/* Make sure the full region is bound. */
+	rc = plpar_hcall(H_SCM_QUERY_BLOCK_MEM_BINDING, ret,
+			 p->drc_index, p->blocks - 1);
+	if (rc)
+		goto err_out;
+	end_addr = ret[0];
+
+	if ((end_addr - start_addr) != ((p->blocks - 1) * p->block_size))
+		goto err_out;
+
+	p->bound_addr = start_addr;
+	dev_dbg(&p->pdev->dev, "bound drc 0x%x to %pR\n", p->drc_index, &p->res);
+	return rc;
+
+err_out:
+	dev_info(&p->pdev->dev,
+		 "Failed to query, trying an unbind followed by bind");
+	drc_pmem_unbind(p);
+	return drc_pmem_bind(p);
+}
+
 
 static int papr_scm_meta_get(struct papr_scm_priv *p,
 			     struct nd_cmd_get_config_data_hdr *hdr)
@@ -275,12 +303,32 @@ static const struct attribute_group *papr_scm_dimm_groups[] = {
 	NULL,
 };
 
+static inline int papr_scm_node(int node)
+{
+	int min_dist = INT_MAX, dist;
+	int nid, min_node;
+
+	if ((node == NUMA_NO_NODE) || node_online(node))
+		return node;
+
+	min_node = first_online_node;
+	for_each_online_node(nid) {
+		dist = node_distance(node, nid);
+		if (dist < min_dist) {
+			min_dist = dist;
+			min_node = nid;
+		}
+	}
+	return min_node;
+}
+
 static int papr_scm_nvdimm_init(struct papr_scm_priv *p)
 {
 	struct device *dev = &p->pdev->dev;
 	struct nd_mapping_desc mapping;
 	struct nd_region_desc ndr_desc;
 	unsigned long dimm_flags;
+	int target_nid, online_nid;
 
 	p->bus_desc.ndctl = papr_scm_ndctl;
 	p->bus_desc.module = THIS_MODULE;
@@ -319,8 +367,10 @@ static int papr_scm_nvdimm_init(struct papr_scm_priv *p)
 
 	memset(&ndr_desc, 0, sizeof(ndr_desc));
 	ndr_desc.attr_groups = region_attr_groups;
-	ndr_desc.numa_node = dev_to_node(&p->pdev->dev);
-	ndr_desc.target_node = ndr_desc.numa_node;
+	target_nid = dev_to_node(&p->pdev->dev);
+	online_nid = papr_scm_node(target_nid);
+	ndr_desc.numa_node = online_nid;
+	ndr_desc.target_node = target_nid;
 	ndr_desc.res = &p->res;
 	ndr_desc.of_node = p->dn;
 	ndr_desc.provider_data = p;
@@ -338,6 +388,9 @@ static int papr_scm_nvdimm_init(struct papr_scm_priv *p)
 				ndr_desc.res, p->dn);
 		goto err;
 	}
+	if (target_nid != online_nid)
+		dev_info(dev, "Region registered with target node %d and online node %d",
+			 target_nid, online_nid);
 
 	return 0;
 
@@ -411,14 +464,14 @@ static int papr_scm_probe(struct platform_device *pdev)
 	rc = drc_pmem_bind(p);
 
 	/* If phyp says drc memory still bound then force unbound and retry */
-	if (rc == -EBUSY) {
-		dev_warn(&pdev->dev, "Retrying bind after unbinding\n");
-		drc_pmem_unbind(p);
-		rc = drc_pmem_bind(p);
-	}
+	if (rc == H_OVERLAP)
+		rc = drc_pmem_query_n_bind(p);
 
-	if (rc)
+	if (rc != H_SUCCESS) {
+		dev_err(&p->pdev->dev, "bind err: %d\n", rc);
+		rc = -ENXIO;
 		goto err;
+	}
 
 	/* setup the resource for the newly bound range */
 	p->res.start = p->bound_addr;
