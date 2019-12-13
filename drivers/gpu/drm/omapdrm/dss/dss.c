@@ -1083,7 +1083,7 @@ static const struct dss_features omap34xx_dss_feats = {
 
 static const struct dss_features omap3630_dss_feats = {
 	.model			=	DSS_MODEL_OMAP3,
-	.fck_div_max		=	32,
+	.fck_div_max		=	31,
 	.fck_freq_max		=	173000000,
 	.dss_fck_multiplier	=	1,
 	.parent_clk_name	=	"dpll4_ck",
@@ -1598,3 +1598,40 @@ struct platform_driver omap_dsshw_driver = {
 		.suppress_bind_attrs = true,
 	},
 };
+
+/* INIT */
+static struct platform_driver * const omap_dss_drivers[] = {
+	&omap_dsshw_driver,
+	&omap_dispchw_driver,
+#ifdef CONFIG_OMAP2_DSS_DSI
+	&omap_dsihw_driver,
+#endif
+#ifdef CONFIG_OMAP2_DSS_VENC
+	&omap_venchw_driver,
+#endif
+#ifdef CONFIG_OMAP4_DSS_HDMI
+	&omapdss_hdmi4hw_driver,
+#endif
+#ifdef CONFIG_OMAP5_DSS_HDMI
+	&omapdss_hdmi5hw_driver,
+#endif
+};
+
+static int __init omap_dss_init(void)
+{
+	return platform_register_drivers(omap_dss_drivers,
+					 ARRAY_SIZE(omap_dss_drivers));
+}
+
+static void __exit omap_dss_exit(void)
+{
+	platform_unregister_drivers(omap_dss_drivers,
+				    ARRAY_SIZE(omap_dss_drivers));
+}
+
+module_init(omap_dss_init);
+module_exit(omap_dss_exit);
+
+MODULE_AUTHOR("Tomi Valkeinen <tomi.valkeinen@ti.com>");
+MODULE_DESCRIPTION("OMAP2/3/4/5 Display Subsystem");
+MODULE_LICENSE("GPL v2");

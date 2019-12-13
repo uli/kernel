@@ -39,9 +39,6 @@
  * ways. Unless there is something clearly wrong with it the code should
  * remain as-is as it provides us with a guarantee from HW that it is correct.
  */
-
-typedef unsigned int uint;
-
 typedef struct {
 	double DPPCLK;
 	double DISPCLK;
@@ -68,6 +65,7 @@ typedef struct {
 
 #define BPP_INVALID 0
 #define BPP_BLENDED_PIPE 0xffffffff
+#define DCN21_MAX_DSC_IMAGE_WIDTH 5184
 
 static void DisplayPipeConfiguration(struct display_mode_lib *mode_lib);
 static void DISPCLKDPPCLKDCFCLKDeepSleepPrefetchParametersWatermarksAndPerformanceCalculation(
@@ -3382,6 +3380,8 @@ static unsigned int TruncToValidBPP(
 				return 30;
 			else if (DecimalBPP >= 24 && (DesiredBPP == 0 || DesiredBPP == 24))
 				return 24;
+			else if (DecimalBPP >= 18 && (DesiredBPP == 0 || DesiredBPP == 18))
+				return 18;
 			else
 				return BPP_INVALID;
 		}
@@ -3939,6 +3939,10 @@ void dml21_ModeSupportAndSystemConfigurationFull(struct display_mode_lib *mode_l
 				mode_lib->vba.MaximumSwathWidthInLineBuffer);
 	}
 	for (i = 0; i <= mode_lib->vba.soc.num_states; i++) {
+		double MaxMaxDispclkRoundedDown = RoundToDFSGranularityDown(
+			mode_lib->vba.MaxDispclk[mode_lib->vba.soc.num_states],
+			mode_lib->vba.DISPCLKDPPCLKVCOSpeed);
+
 		for (j = 0; j < 2; j++) {
 			mode_lib->vba.MaxDispclkRoundedDownToDFSGranularity = RoundToDFSGranularityDown(
 				mode_lib->vba.MaxDispclk[i],
@@ -3968,7 +3972,9 @@ void dml21_ModeSupportAndSystemConfigurationFull(struct display_mode_lib *mode_l
 						&& i == mode_lib->vba.soc.num_states)
 					mode_lib->vba.PlaneRequiredDISPCLKWithODMCombine = mode_lib->vba.PixelClock[k] / 2
 							* (1 + mode_lib->vba.DISPCLKDPPCLKDSCCLKDownSpreading / 100.0);
-				if (mode_lib->vba.ODMCapability == false || mode_lib->vba.PlaneRequiredDISPCLKWithoutODMCombine <= mode_lib->vba.MaxDispclkRoundedDownToDFSGranularity) {
+				if (mode_lib->vba.ODMCapability == false ||
+						(locals->PlaneRequiredDISPCLKWithoutODMCombine <= MaxMaxDispclkRoundedDown
+							&& (!locals->DSCEnabled[k] || locals->HActive[k] <= DCN21_MAX_DSC_IMAGE_WIDTH))) {
 					locals->ODMCombineEnablePerState[i][k] = false;
 					mode_lib->vba.PlaneRequiredDISPCLK = mode_lib->vba.PlaneRequiredDISPCLKWithoutODMCombine;
 				} else {
@@ -4774,7 +4780,7 @@ void dml21_ModeSupportAndSystemConfigurationFull(struct display_mode_lib *mode_l
 				mode_lib->vba.MaximumReadBandwidthWithoutPrefetch = 0.0;
 				mode_lib->vba.MaximumReadBandwidthWithPrefetch = 0.0;
 				for (k = 0; k <= mode_lib->vba.NumberOfActivePlanes - 1; k++) {
-					uint m;
+					unsigned int m;
 
 					locals->cursor_bw[k] = 0;
 					locals->cursor_bw_pre[k] = 0;
@@ -5285,7 +5291,7 @@ static void CalculateWatermarksAndDRAMSpeedChangeSupport(
 	double SecondMinActiveDRAMClockChangeMarginOneDisplayInVBLank;
 	double FullDETBufferingTimeYStutterCriticalPlane = 0;
 	double TimeToFinishSwathTransferStutterCriticalPlane = 0;
-	uint k, j;
+	unsigned int k, j;
 
 	mode_lib->vba.TotalActiveDPP = 0;
 	mode_lib->vba.TotalDCCActiveDPP = 0;
@@ -5507,7 +5513,7 @@ static void CalculateDCFCLKDeepSleep(
 		double DPPCLK[],
 		double *DCFCLKDeepSleep)
 {
-	uint k;
+	unsigned int k;
 	double DisplayPipeLineDeliveryTimeLuma;
 	double DisplayPipeLineDeliveryTimeChroma;
 	//double   DCFCLKDeepSleepPerPlane[DC__NUM_DPP__MAX];
@@ -5727,7 +5733,7 @@ static void CalculatePixelDeliveryTimes(
 		double DisplayPipeRequestDeliveryTimeChromaPrefetch[])
 {
 	double req_per_swath_ub;
-	uint k;
+	unsigned int k;
 
 	for (k = 0; k < NumberOfActivePlanes; ++k) {
 		if (VRatio[k] <= 1) {
@@ -5869,7 +5875,7 @@ static void CalculateMetaAndPTETimes(
 	unsigned int dpte_groups_per_row_chroma_ub;
 	unsigned int num_group_per_lower_vm_stage;
 	unsigned int num_req_per_lower_vm_stage;
-	uint k;
+	unsigned int k;
 
 	for (k = 0; k < NumberOfActivePlanes; ++k) {
 		if (GPUVMEnable == true) {

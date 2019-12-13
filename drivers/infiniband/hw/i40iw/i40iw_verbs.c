@@ -1763,7 +1763,7 @@ static struct ib_mr *i40iw_reg_user_mr(struct ib_pd *pd,
 
 	if (length > I40IW_MAX_MR_SIZE)
 		return ERR_PTR(-EINVAL);
-	region = ib_umem_get(udata, start, length, acc, 0);
+	region = ib_umem_get(udata, start, length, acc);
 	if (IS_ERR(region))
 		return (struct ib_mr *)region;
 
@@ -2773,6 +2773,10 @@ int i40iw_register_rdma_device(struct i40iw_device *iwdev)
 		return -ENOMEM;
 	iwibdev = iwdev->iwibdev;
 	rdma_set_device_sysfs_group(&iwibdev->ibdev, &i40iw_attr_group);
+	ret = ib_device_set_netdev(&iwibdev->ibdev, iwdev->netdev, 1);
+	if (ret)
+		goto error;
+
 	ret = ib_register_device(&iwibdev->ibdev, "i40iw%d");
 	if (ret)
 		goto error;
