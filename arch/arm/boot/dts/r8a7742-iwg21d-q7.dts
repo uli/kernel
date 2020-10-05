@@ -75,7 +75,7 @@
 
 	lvds-receiver {
 		compatible = "ti,ds90cf384a", "lvds-decoder";
-		vcc-supply = <&vcc_3v3_tft1>;
+		power-supply = <&vcc_3v3_tft1>;
 
 		ports {
 			#address-cells = <1>;
