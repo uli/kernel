@@ -2502,6 +2502,39 @@ static const unsigned int scif_clk_mux[] = {
 	SCIF_CLK_MARK,
 };
 
+/* - TMU -------------------------------------------------------------------- */
+static const unsigned int tmu_tclk1_pins[] = {
+	/* TCLK1 */
+	RCAR_GP_PIN(2, 23),
+};
+static const unsigned int tmu_tclk1_mux[] = {
+	TCLK1_MARK,
+};
+
+static const unsigned int tmu_tclk2_pins[] = {
+	/* TCLK2 */
+	RCAR_GP_PIN(2, 24),
+};
+static const unsigned int tmu_tclk2_mux[] = {
+	TCLK2_MARK,
+};
+
+static const unsigned int tmu_tclk3_pins[] = {
+	/* TCLK3 */
+	RCAR_GP_PIN(2, 11),
+};
+static const unsigned int tmu_tclk3_mux[] = {
+	TCLK3_MARK,
+};
+
+static const unsigned int tmu_tclk4_pins[] = {
+	/* TCLK4 */
+	RCAR_GP_PIN(2, 12),
+};
+static const unsigned int tmu_tclk4_mux[] = {
+	TCLK4_MARK,
+};
+
 static const struct sh_pfc_pin_group pinmux_groups[] = {
 	SH_PFC_PIN_GROUP(avb0_link),
 	SH_PFC_PIN_GROUP(avb0_magic),
@@ -2666,6 +2699,11 @@ static const struct sh_pfc_pin_group pinmux_groups[] = {
 	SH_PFC_PIN_GROUP(scif4_clk),
 	SH_PFC_PIN_GROUP(scif4_ctrl),
 	SH_PFC_PIN_GROUP(scif_clk),
+
+	SH_PFC_PIN_GROUP(tmu_tclk1),
+	SH_PFC_PIN_GROUP(tmu_tclk2),
+	SH_PFC_PIN_GROUP(tmu_tclk3),
+	SH_PFC_PIN_GROUP(tmu_tclk4),
 };
 
 static const char * const avb0_groups[] = {
@@ -2952,6 +2990,13 @@ static const char * const scif_clk_groups[] = {
 	"scif_clk",
 };
 
+static const char * const tmu_groups[] = {
+	"tmu_tclk1",
+	"tmu_tclk2",
+	"tmu_tclk3",
+	"tmu_tclk4",
+};
+
 static const struct sh_pfc_function pinmux_functions[] = {
 	SH_PFC_FUNCTION(avb0),
 	SH_PFC_FUNCTION(avb1),
@@ -3008,6 +3053,8 @@ static const struct sh_pfc_function pinmux_functions[] = {
 	SH_PFC_FUNCTION(scif3),
 	SH_PFC_FUNCTION(scif4),
 	SH_PFC_FUNCTION(scif_clk),
+
+	SH_PFC_FUNCTION(tmu),
 };
 
 static const struct pinmux_cfg_reg pinmux_config_regs[] = {
