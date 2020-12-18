@@ -12,6 +12,13 @@
 
 #define WDTRSTCR_RESET		0xA55A0002
 #define WDTRSTCR		0x0054
+#define V3U_WDTRSTCR		0x0010
+
+static int v3u_rst_enable_wdt_reset(void __iomem *base)
+{
+	iowrite32(WDTRSTCR_RESET, base + V3U_WDTRSTCR);
+	return 0;
+}
 
 #define CR7BAR			0x0070
 #define CR7BAREN		BIT(4)
@@ -68,6 +75,7 @@ static const struct rst_config rcar_rst_gen3 __initconst = {
 
 static const struct rst_config rcar_rst_r8a779a0 __initconst = {
 	.modemr = 0x00,		/* MODEMR0 and it has CPG related bits */
+	.configure = v3u_rst_enable_wdt_reset,
 };
 
 static const struct of_device_id rcar_rst_matches[] __initconst = {
