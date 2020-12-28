@@ -245,6 +245,7 @@ properties:
           - enum:
               - renesas,r8a7795
               - renesas,r8a7796
+              - renesas,r8a77961
               - renesas,r8a77965
 
       - description: R-Car M3-N (R8A77965)
@@ -298,5 +299,7 @@ properties:
           - enum:
               - renesas,rzn1d400-db # RZN1D-DB (RZ/N1D Demo Board for the RZ/N1D 400 pins package)
           - const: renesas,r9a06g032
+
+additionalProperties: true
 
 ...

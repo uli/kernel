@@ -225,7 +225,7 @@ static gfn_t get_mmio_spte_gfn(u64 spte)
 {
 	u64 gpa = spte & shadow_nonpresent_or_rsvd_lower_gfn_mask;
 
-	gpa |= (spte >> shadow_nonpresent_or_rsvd_mask_len)
+	gpa |= (spte >> SHADOW_NONPRESENT_OR_RSVD_MASK_LEN)
 	       & shadow_nonpresent_or_rsvd_mask;
 
 	return gpa >> PAGE_SHIFT;
@@ -591,15 +591,15 @@ static u64 mmu_spte_get_lockless(u64 *sptep)
 static u64 restore_acc_track_spte(u64 spte)
 {
 	u64 new_spte = spte;
-	u64 saved_bits = (spte >> shadow_acc_track_saved_bits_shift)
-			 & shadow_acc_track_saved_bits_mask;
+	u64 saved_bits = (spte >> SHADOW_ACC_TRACK_SAVED_BITS_SHIFT)
+			 & SHADOW_ACC_TRACK_SAVED_BITS_MASK;
 
 	WARN_ON_ONCE(spte_ad_enabled(spte));
 	WARN_ON_ONCE(!is_access_track_spte(spte));
 
 	new_spte &= ~shadow_acc_track_mask;
-	new_spte &= ~(shadow_acc_track_saved_bits_mask <<
-		      shadow_acc_track_saved_bits_shift);
+	new_spte &= ~(SHADOW_ACC_TRACK_SAVED_BITS_MASK <<
+		      SHADOW_ACC_TRACK_SAVED_BITS_SHIFT);
 	new_spte |= saved_bits;
 
 	return new_spte;
@@ -820,7 +820,7 @@ gfn_to_memslot_dirty_bitmap(struct kvm_vcpu *vcpu, gfn_t gfn,
 	slot = kvm_vcpu_gfn_to_memslot(vcpu, gfn);
 	if (!slot || slot->flags & KVM_MEMSLOT_INVALID)
 		return NULL;
-	if (no_dirty_log && slot->dirty_bitmap)
+	if (no_dirty_log && kvm_slot_dirty_track_enabled(slot))
 		return NULL;
 
 	return slot;
@@ -856,12 +856,14 @@ static int pte_list_add(struct kvm_vcpu *vcpu, u64 *spte,
 	} else {
 		rmap_printk("pte_list_add: %p %llx many->many\n", spte, *spte);
 		desc = (struct pte_list_desc *)(rmap_head->val & ~1ul);
-		while (desc->sptes[PTE_LIST_EXT-1] && desc->more) {
-			desc = desc->more;
+		while (desc->sptes[PTE_LIST_EXT-1]) {
 			count += PTE_LIST_EXT;
-		}
-		if (desc->sptes[PTE_LIST_EXT-1]) {
-			desc->more = mmu_alloc_pte_list_desc(vcpu);
+
+			if (!desc->more) {
+				desc->more = mmu_alloc_pte_list_desc(vcpu);
+				desc = desc->more;
+				break;
+			}
 			desc = desc->more;
 		}
 		for (i = 0; desc->sptes[i]; ++i)
@@ -1285,6 +1287,14 @@ void kvm_arch_mmu_enable_log_dirty_pt_masked(struct kvm *kvm,
 				mask);
 	else
 		kvm_mmu_write_protect_pt_masked(kvm, slot, gfn_offset, mask);
+}
+
+int kvm_cpu_dirty_log_size(void)
+{
+	if (kvm_x86_ops.cpu_dirty_log_size)
+		return kvm_x86_ops.cpu_dirty_log_size();
+
+	return 0;
 }
 
 bool kvm_mmu_slot_gfn_write_protect(struct kvm *kvm,
@@ -3515,7 +3525,7 @@ static bool get_mmio_spte(struct kvm_vcpu *vcpu, u64 addr, u64 *sptep)
 {
 	u64 sptes[PT64_ROOT_MAX_LEVEL];
 	struct rsvd_bits_validate *rsvd_check;
-	int root = vcpu->arch.mmu->root_level;
+	int root = vcpu->arch.mmu->shadow_root_level;
 	int leaf;
 	int level;
 	bool reserved = false;
