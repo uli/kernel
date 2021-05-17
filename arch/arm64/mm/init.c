@@ -35,6 +35,7 @@
 #include <asm/fixmap.h>
 #include <asm/kasan.h>
 #include <asm/kernel-pgtable.h>
+#include <asm/kvm_host.h>
 #include <asm/memory.h>
 #include <asm/numa.h>
 #include <asm/sections.h>
@@ -53,13 +54,13 @@ s64 memstart_addr __ro_after_init = -1;
 EXPORT_SYMBOL(memstart_addr);
 
 /*
- * We create both ZONE_DMA and ZONE_DMA32. ZONE_DMA covers the first 1G of
- * memory as some devices, namely the Raspberry Pi 4, have peripherals with
- * this limited view of the memory. ZONE_DMA32 will cover the rest of the 32
- * bit addressable memory area.
+ * If the corresponding config options are enabled, we create both ZONE_DMA
+ * and ZONE_DMA32. By default ZONE_DMA covers the 32-bit addressable memory
+ * unless restricted on specific platforms (e.g. 30-bit on Raspberry Pi 4).
+ * In such case, ZONE_DMA32 covers the rest of the 32-bit addressable memory,
+ * otherwise it is empty.
  */
 phys_addr_t arm64_dma_phys_limit __ro_after_init;
-static phys_addr_t arm64_dma32_phys_limit __ro_after_init;
 
 #ifdef CONFIG_KEXEC_CORE
 /*
@@ -84,7 +85,7 @@ static void __init reserve_crashkernel(void)
 
 	if (crash_base == 0) {
 		/* Current arm64 boot protocol requires 2MB alignment */
-		crash_base = memblock_find_in_range(0, arm64_dma32_phys_limit,
+		crash_base = memblock_find_in_range(0, arm64_dma_phys_limit,
 				crash_size, SZ_2M);
 		if (crash_base == 0) {
 			pr_warn("cannot allocate crashkernel (size:0x%llx)\n",
@@ -196,6 +197,7 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	unsigned long max_zone_pfns[MAX_NR_ZONES]  = {0};
 	unsigned int __maybe_unused acpi_zone_dma_bits;
 	unsigned int __maybe_unused dt_zone_dma_bits;
+	phys_addr_t __maybe_unused dma32_phys_limit = max_zone_phys(32);
 
 #ifdef CONFIG_ZONE_DMA
 	acpi_zone_dma_bits = fls64(acpi_iort_dma_get_max_cpu_address());
@@ -205,8 +207,12 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	max_zone_pfns[ZONE_DMA] = PFN_DOWN(arm64_dma_phys_limit);
 #endif
 #ifdef CONFIG_ZONE_DMA32
-	max_zone_pfns[ZONE_DMA32] = PFN_DOWN(arm64_dma32_phys_limit);
+	max_zone_pfns[ZONE_DMA32] = PFN_DOWN(dma32_phys_limit);
+	if (!arm64_dma_phys_limit)
+		arm64_dma_phys_limit = dma32_phys_limit;
 #endif
+	if (!arm64_dma_phys_limit)
+		arm64_dma_phys_limit = PHYS_MASK + 1;
 	max_zone_pfns[ZONE_NORMAL] = max;
 
 	free_area_init(max_zone_pfns);
@@ -214,18 +220,37 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 
 int pfn_valid(unsigned long pfn)
 {
-	phys_addr_t addr = pfn << PAGE_SHIFT;
+	phys_addr_t addr = PFN_PHYS(pfn);
+	struct mem_section *ms;
 
-	if ((addr >> PAGE_SHIFT) != pfn)
+	/*
+	 * Ensure the upper PAGE_SHIFT bits are clear in the
+	 * pfn. Else it might lead to false positives when
+	 * some of the upper bits are set, but the lower bits
+	 * match a valid pfn.
+	 */
+	if (PHYS_PFN(addr) != pfn)
 		return 0;
 
-#ifdef CONFIG_SPARSEMEM
 	if (pfn_to_section_nr(pfn) >= NR_MEM_SECTIONS)
 		return 0;
 
-	if (!valid_section(__pfn_to_section(pfn)))
+	ms = __pfn_to_section(pfn);
+	if (!valid_section(ms))
 		return 0;
-#endif
+
+	/*
+	 * ZONE_DEVICE memory does not have the memblock entries.
+	 * memblock_is_map_memory() check for ZONE_DEVICE based
+	 * addresses will always fail. Even the normal hotplugged
+	 * memory will never have MEMBLOCK_NOMAP flag set in their
+	 * memblock entries. Skip memblock search for all non early
+	 * memory sections covering all of hotplug memory including
+	 * both normal and ZONE_DEVICE based.
+	 */
+	if (!early_section(ms))
+		return pfn_section_valid(ms, pfn);
+
 	return memblock_is_map_memory(addr);
 }
 EXPORT_SYMBOL(pfn_valid);
@@ -394,16 +419,9 @@ void __init arm64_memblock_init(void)
 
 	early_init_fdt_scan_reserved_mem();
 
-	if (IS_ENABLED(CONFIG_ZONE_DMA32))
-		arm64_dma32_phys_limit = max_zone_phys(32);
-	else
-		arm64_dma32_phys_limit = PHYS_MASK + 1;
-
 	reserve_elfcorehdr();
 
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
-
-	dma_contiguous_reserve(arm64_dma32_phys_limit);
 }
 
 void __init bootmem_init(void)
@@ -418,10 +436,10 @@ void __init bootmem_init(void)
 	max_pfn = max_low_pfn = max;
 	min_low_pfn = min;
 
-	arm64_numa_init();
+	arch_numa_init();
 
 	/*
-	 * must be done after arm64_numa_init() which calls numa_init() to
+	 * must be done after arch_numa_init() which calls numa_init() to
 	 * initialize node_online_map that gets used in hugetlb_cma_reserve()
 	 * while allocating required CMA size across online nodes.
 	 */
@@ -431,12 +449,19 @@ void __init bootmem_init(void)
 
 	dma_pernuma_cma_reserve();
 
+	kvm_hyp_reserve();
+
 	/*
 	 * sparse_init() tries to allocate memory from memblock, so must be
 	 * done after the fixed reservations
 	 */
 	sparse_init();
 	zone_sizes_init(min, max);
+
+	/*
+	 * Reserve the CMA area after arm64_dma_phys_limit was initialised.
+	 */
+	dma_contiguous_reserve(arm64_dma_phys_limit);
 
 	/*
 	 * request_standard_resources() depends on crashkernel's memory being
@@ -455,7 +480,7 @@ void __init bootmem_init(void)
 void __init mem_init(void)
 {
 	if (swiotlb_force == SWIOTLB_FORCE ||
-	    max_pfn > PFN_DOWN(arm64_dma_phys_limit ? : arm64_dma32_phys_limit))
+	    max_pfn > PFN_DOWN(arm64_dma_phys_limit))
 		swiotlb_init(1);
 	else
 		swiotlb_force = SWIOTLB_NO_FORCE;
@@ -464,8 +489,6 @@ void __init mem_init(void)
 
 	/* this will put all unused low memory onto the freelists */
 	memblock_free_all();
-
-	mem_init_print_info(NULL);
 
 	/*
 	 * Check boundaries twice: Some fundamental inconsistencies can be
@@ -495,7 +518,7 @@ void free_initmem(void)
 	 * prevents the region from being reused for kernel modules, which
 	 * is not supported by kallsyms.
 	 */
-	unmap_kernel_range((u64)__init_begin, (u64)(__init_end - __init_begin));
+	vunmap_range((u64)__init_begin, (u64)__init_end);
 }
 
 void dump_mem_limit(void)

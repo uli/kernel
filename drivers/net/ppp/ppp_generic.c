@@ -623,6 +623,7 @@ static int ppp_bridge_channels(struct channel *pch, struct channel *pchb)
 		write_unlock_bh(&pch->upl);
 		return -EALREADY;
 	}
+	refcount_inc(&pchb->file.refcnt);
 	rcu_assign_pointer(pch->bridge, pchb);
 	write_unlock_bh(&pch->upl);
 
@@ -632,19 +633,24 @@ static int ppp_bridge_channels(struct channel *pch, struct channel *pchb)
 		write_unlock_bh(&pchb->upl);
 		goto err_unset;
 	}
+	refcount_inc(&pch->file.refcnt);
 	rcu_assign_pointer(pchb->bridge, pch);
 	write_unlock_bh(&pchb->upl);
-
-	refcount_inc(&pch->file.refcnt);
-	refcount_inc(&pchb->file.refcnt);
 
 	return 0;
 
 err_unset:
 	write_lock_bh(&pch->upl);
+	/* Re-read pch->bridge with upl held in case it was modified concurrently */
+	pchb = rcu_dereference_protected(pch->bridge, lockdep_is_held(&pch->upl));
 	RCU_INIT_POINTER(pch->bridge, NULL);
 	write_unlock_bh(&pch->upl);
 	synchronize_rcu();
+
+	if (pchb)
+		if (refcount_dec_and_test(&pchb->file.refcnt))
+			ppp_destroy_channel(pchb);
+
 	return -EALREADY;
 }
 
@@ -1554,12 +1560,34 @@ static void ppp_dev_priv_destructor(struct net_device *dev)
 		ppp_destroy_interface(ppp);
 }
 
+static int ppp_fill_forward_path(struct net_device_path_ctx *ctx,
+				 struct net_device_path *path)
+{
+	struct ppp *ppp = netdev_priv(ctx->dev);
+	struct ppp_channel *chan;
+	struct channel *pch;
+
+	if (ppp->flags & SC_MULTILINK)
+		return -EOPNOTSUPP;
+
+	if (list_empty(&ppp->channels))
+		return -ENODEV;
+
+	pch = list_first_entry(&ppp->channels, struct channel, clist);
+	chan = pch->chan;
+	if (!chan->ops->fill_forward_path)
+		return -EOPNOTSUPP;
+
+	return chan->ops->fill_forward_path(ctx, path, chan);
+}
+
 static const struct net_device_ops ppp_netdev_ops = {
 	.ndo_init	 = ppp_dev_init,
 	.ndo_uninit      = ppp_dev_uninit,
 	.ndo_start_xmit  = ppp_start_xmit,
 	.ndo_do_ioctl    = ppp_net_ioctl,
 	.ndo_get_stats64 = ppp_get_stats64,
+	.ndo_fill_forward_path = ppp_fill_forward_path,
 };
 
 static struct device_type ppp_type = {

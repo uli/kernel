@@ -15,6 +15,7 @@
 #include <linux/jiffies.h>
 #include <linux/sched.h>
 #include <linux/mtd/mtd.h>
+#include <linux/mtd/nand-ecc-sw-bch.h>
 #include <linux/mtd/rawnand.h>
 #include <linux/mtd/partitions.h>
 #include <linux/omap-dma.h>
@@ -1866,18 +1867,20 @@ static const struct mtd_ooblayout_ops omap_ooblayout_ops = {
 static int omap_sw_ooblayout_ecc(struct mtd_info *mtd, int section,
 				 struct mtd_oob_region *oobregion)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
+	struct nand_device *nand = mtd_to_nanddev(mtd);
+	unsigned int nsteps = nanddev_get_ecc_nsteps(nand);
+	unsigned int ecc_bytes = nanddev_get_ecc_bytes_per_step(nand);
 	int off = BADBLOCK_MARKER_LENGTH;
 
-	if (section >= chip->ecc.steps)
+	if (section >= nsteps)
 		return -ERANGE;
 
 	/*
 	 * When SW correction is employed, one OMAP specific marker byte is
 	 * reserved after each ECC step.
 	 */
-	oobregion->offset = off + (section * (chip->ecc.bytes + 1));
-	oobregion->length = chip->ecc.bytes;
+	oobregion->offset = off + (section * (ecc_bytes + 1));
+	oobregion->length = ecc_bytes;
 
 	return 0;
 }
@@ -1885,7 +1888,9 @@ static int omap_sw_ooblayout_ecc(struct mtd_info *mtd, int section,
 static int omap_sw_ooblayout_free(struct mtd_info *mtd, int section,
 				  struct mtd_oob_region *oobregion)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
+	struct nand_device *nand = mtd_to_nanddev(mtd);
+	unsigned int nsteps = nanddev_get_ecc_nsteps(nand);
+	unsigned int ecc_bytes = nanddev_get_ecc_bytes_per_step(nand);
 	int off = BADBLOCK_MARKER_LENGTH;
 
 	if (section)
@@ -1895,7 +1900,7 @@ static int omap_sw_ooblayout_free(struct mtd_info *mtd, int section,
 	 * When SW correction is employed, one OMAP specific marker byte is
 	 * reserved after each ECC step.
 	 */
-	off += ((chip->ecc.bytes + 1) * chip->ecc.steps);
+	off += ((ecc_bytes + 1) * nsteps);
 	if (off >= mtd->oobsize)
 		return -ERANGE;
 

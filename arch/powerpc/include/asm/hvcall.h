@@ -315,7 +315,8 @@
 #define H_SCM_HEALTH            0x400
 #define H_SCM_PERFORMANCE_STATS 0x418
 #define H_RPT_INVALIDATE	0x448
-#define MAX_HCALL_OPCODE	H_RPT_INVALIDATE
+#define H_SCM_FLUSH		0x44C
+#define MAX_HCALL_OPCODE	H_SCM_FLUSH
 
 /* Scope args for H_SCM_UNBIND_ALL */
 #define H_UNBIND_SCOPE_ALL (0x1)
@@ -389,6 +390,7 @@
 #define H_CPU_BEHAV_FAVOUR_SECURITY	(1ull << 63) // IBM bit 0
 #define H_CPU_BEHAV_L1D_FLUSH_PR	(1ull << 62) // IBM bit 1
 #define H_CPU_BEHAV_BNDS_CHK_SPEC_BAR	(1ull << 61) // IBM bit 2
+#define H_CPU_BEHAV_FAVOUR_SECURITY_H	(1ull << 60) // IBM bit 3
 #define H_CPU_BEHAV_FLUSH_COUNT_CACHE	(1ull << 58) // IBM bit 5
 #define H_CPU_BEHAV_FLUSH_LINK_STACK	(1ull << 57) // IBM bit 6
 
@@ -535,9 +537,12 @@ struct h_cpu_char_result {
 	u64 behaviour;
 };
 
-/* Register state for entering a nested guest with H_ENTER_NESTED */
+/*
+ * Register state for entering a nested guest with H_ENTER_NESTED.
+ * New member must be added at the end.
+ */
 struct hv_guest_state {
-	u64 version;		/* version of this structure layout */
+	u64 version;		/* version of this structure layout, must be first */
 	u32 lpid;
 	u32 vcpu_token;
 	/* These registers are hypervisor privileged (at least for writing) */
@@ -566,10 +571,26 @@ struct hv_guest_state {
 	u64 pidr;
 	u64 cfar;
 	u64 ppr;
+	/* Version 1 ends here */
+	u64 dawr1;
+	u64 dawrx1;
+	/* Version 2 ends here */
 };
 
 /* Latest version of hv_guest_state structure */
-#define HV_GUEST_STATE_VERSION	1
+#define HV_GUEST_STATE_VERSION	2
+
+static inline int hv_guest_state_size(unsigned int version)
+{
+	switch (version) {
+	case 1:
+		return offsetofend(struct hv_guest_state, ppr);
+	case 2:
+		return offsetofend(struct hv_guest_state, dawrx1);
+	default:
+		return -1;
+	}
+}
 
 /*
  * From the document "H_GetPerformanceCounterInfo Interface" v1.07

@@ -38,6 +38,7 @@
 #include "intel_fifo_underrun.h"
 #include "intel_panel.h"
 #include "intel_sideband.h"
+#include "skl_scaler.h"
 
 /* return pixels in terms of txbyteclkhs */
 static u16 txbyteclkhs(u16 pixels, int bpp, int lane_count,
@@ -812,10 +813,20 @@ static void intel_dsi_pre_enable(struct intel_atomic_state *state,
 		intel_dsi_prepare(encoder, pipe_config);
 
 	intel_dsi_vbt_exec_sequence(intel_dsi, MIPI_SEQ_POWER_ON);
-	intel_dsi_msleep(intel_dsi, intel_dsi->panel_on_delay);
 
-	/* Deassert reset */
-	intel_dsi_vbt_exec_sequence(intel_dsi, MIPI_SEQ_DEASSERT_RESET);
+	/*
+	 * Give the panel time to power-on and then deassert its reset.
+	 * Depending on the VBT MIPI sequences version the deassert-seq
+	 * may contain the necessary delay, intel_dsi_msleep() will skip
+	 * the delay in that case. If there is no deassert-seq, then an
+	 * unconditional msleep is used to give the panel time to power-on.
+	 */
+	if (dev_priv->vbt.dsi.sequence[MIPI_SEQ_DEASSERT_RESET]) {
+		intel_dsi_msleep(intel_dsi, intel_dsi->panel_on_delay);
+		intel_dsi_vbt_exec_sequence(intel_dsi, MIPI_SEQ_DEASSERT_RESET);
+	} else {
+		msleep(intel_dsi->panel_on_delay);
+	}
 
 	if (IS_GEMINILAKE(dev_priv)) {
 		glk_cold_boot = glk_dsi_enable_io(encoder);
@@ -982,14 +993,14 @@ static void intel_dsi_post_disable(struct intel_atomic_state *state,
 	 * FIXME As we do with eDP, just make a note of the time here
 	 * and perform the wait before the next panel power on.
 	 */
-	intel_dsi_msleep(intel_dsi, intel_dsi->panel_pwr_cycle_delay);
+	msleep(intel_dsi->panel_pwr_cycle_delay);
 }
 
 static void intel_dsi_shutdown(struct intel_encoder *encoder)
 {
 	struct intel_dsi *intel_dsi = enc_to_intel_dsi(encoder);
 
-	intel_dsi_msleep(intel_dsi, intel_dsi->panel_pwr_cycle_delay);
+	msleep(intel_dsi->panel_pwr_cycle_delay);
 }
 
 static bool intel_dsi_get_hw_state(struct intel_encoder *encoder,

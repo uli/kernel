@@ -214,6 +214,7 @@ find_free_vf_and_create_qp_grp(struct usnic_ib_dev *us_ibdev,
 
 		}
 		usnic_uiom_free_dev_list(dev_list);
+		dev_list = NULL;
 	}
 
 	/* Try to find resources on an unused vf */
@@ -239,6 +240,8 @@ find_free_vf_and_create_qp_grp(struct usnic_ib_dev *us_ibdev,
 qp_grp_check:
 	if (IS_ERR_OR_NULL(qp_grp)) {
 		usnic_err("Failed to allocate qp_grp\n");
+		if (usnic_ib_share_vf)
+			usnic_uiom_free_dev_list(dev_list);
 		return ERR_PTR(qp_grp ? PTR_ERR(qp_grp) : -ENOMEM);
 	}
 	return qp_grp;
@@ -267,7 +270,7 @@ static int create_qp_validate_user_data(struct usnic_ib_create_qp_cmd cmd)
 /* Start of ib callback functions */
 
 enum rdma_link_layer usnic_ib_port_link_layer(struct ib_device *device,
-						u8 port_num)
+					      u32 port_num)
 {
 	return IB_LINK_LAYER_ETHERNET;
 }
@@ -329,7 +332,7 @@ int usnic_ib_query_device(struct ib_device *ibdev,
 	return 0;
 }
 
-int usnic_ib_query_port(struct ib_device *ibdev, u8 port,
+int usnic_ib_query_port(struct ib_device *ibdev, u32 port,
 				struct ib_port_attr *props)
 {
 	struct usnic_ib_dev *us_ibdev = to_usdev(ibdev);
@@ -417,7 +420,7 @@ err_out:
 	return err;
 }
 
-int usnic_ib_query_gid(struct ib_device *ibdev, u8 port, int index,
+int usnic_ib_query_gid(struct ib_device *ibdev, u32 port, int index,
 				union ib_gid *gid)
 {
 

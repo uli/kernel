@@ -46,7 +46,7 @@
 #endif
 
 #ifdef CONFIG_KASAN_HW_TAGS
-#define TCR_KASAN_HW_FLAGS SYS_TCR_EL1_TCMA1 | TCR_TBI1
+#define TCR_KASAN_HW_FLAGS SYS_TCR_EL1_TCMA1 | TCR_TBI1 | TCR_TBID1
 #else
 #define TCR_KASAN_HW_FLAGS 0
 #endif
@@ -291,17 +291,7 @@ skip_pgd:
 	/* We're done: fire up the MMU again */
 	mrs	x17, sctlr_el1
 	orr	x17, x17, #SCTLR_ELx_M
-	msr	sctlr_el1, x17
-	isb
-
-	/*
-	 * Invalidate the local I-cache so that any instructions fetched
-	 * speculatively from the PoC are discarded, since they may have
-	 * been dynamically patched at the PoU.
-	 */
-	ic	iallu
-	dsb	nsh
-	isb
+	set_sctlr_el1	x17
 
 	/* Set the flag to zero to indicate that we're all done */
 	str	wzr, [flag_ptr]
@@ -429,14 +419,17 @@ SYM_FUNC_START(__cpu_setup)
 	reset_amuserenr_el0 x1			// Disable AMU access from EL0
 
 	/*
-	 * Memory region attributes
+	 * Default values for VMSA control registers. These will be adjusted
+	 * below depending on detected CPU features.
 	 */
-	mov_q	x5, MAIR_EL1_SET
+	mair	.req	x17
+	tcr	.req	x16
+	mov_q	mair, MAIR_EL1_SET
+	mov_q	tcr, TCR_TxSZ(VA_BITS) | TCR_CACHE_FLAGS | TCR_SMP_FLAGS | \
+			TCR_TG_FLAGS | TCR_KASLR_FLAGS | TCR_ASID16 | \
+			TCR_TBI0 | TCR_A1 | TCR_KASAN_SW_FLAGS
+
 #ifdef CONFIG_ARM64_MTE
-	mte_tcr	.req	x20
-
-	mov	mte_tcr, #0
-
 	/*
 	 * Update MAIR_EL1, GCR_EL1 and TFSR*_EL1 if MTE is supported
 	 * (ID_AA64PFR1_EL1[11:8] > 1).
@@ -448,7 +441,7 @@ SYM_FUNC_START(__cpu_setup)
 
 	/* Normal Tagged memory type at the corresponding MAIR index */
 	mov	x10, #MAIR_ATTR_NORMAL_TAGGED
-	bfi	x5, x10, #(8 *  MT_NORMAL_TAGGED), #8
+	bfi	mair, x10, #(8 *  MT_NORMAL_TAGGED), #8
 
 	/* initialize GCR_EL1: all non-zero tags excluded by default */
 	mov	x10, #(SYS_GCR_EL1_RRND | SYS_GCR_EL1_EXCL_MASK)
@@ -459,37 +452,26 @@ SYM_FUNC_START(__cpu_setup)
 	msr_s	SYS_TFSRE0_EL1, xzr
 
 	/* set the TCR_EL1 bits */
-	mov_q	mte_tcr, TCR_KASAN_HW_FLAGS
+	mov_q	x10, TCR_KASAN_HW_FLAGS
+	orr	tcr, tcr, x10
 1:
 #endif
-	msr	mair_el1, x5
-	/*
-	 * Set/prepare TCR and TTBR. We use 512GB (39-bit) address range for
-	 * both user and kernel.
-	 */
-	mov_q	x10, TCR_TxSZ(VA_BITS) | TCR_CACHE_FLAGS | TCR_SMP_FLAGS | \
-			TCR_TG_FLAGS | TCR_KASLR_FLAGS | TCR_ASID16 | \
-			TCR_TBI0 | TCR_A1 | TCR_KASAN_SW_FLAGS
-#ifdef CONFIG_ARM64_MTE
-	orr	x10, x10, mte_tcr
-	.unreq	mte_tcr
-#endif
-	tcr_clear_errata_bits x10, x9, x5
+	tcr_clear_errata_bits tcr, x9, x5
 
 #ifdef CONFIG_ARM64_VA_BITS_52
 	ldr_l		x9, vabits_actual
 	sub		x9, xzr, x9
 	add		x9, x9, #64
-	tcr_set_t1sz	x10, x9
+	tcr_set_t1sz	tcr, x9
 #else
 	ldr_l		x9, idmap_t0sz
 #endif
-	tcr_set_t0sz	x10, x9
+	tcr_set_t0sz	tcr, x9
 
 	/*
 	 * Set the IPS bits in TCR_EL1.
 	 */
-	tcr_compute_pa_size x10, #TCR_IPS_SHIFT, x5, x6
+	tcr_compute_pa_size tcr, #TCR_IPS_SHIFT, x5, x6
 #ifdef CONFIG_ARM64_HW_AFDBM
 	/*
 	 * Enable hardware update of the Access Flags bit.
@@ -499,13 +481,17 @@ SYM_FUNC_START(__cpu_setup)
 	mrs	x9, ID_AA64MMFR1_EL1
 	and	x9, x9, #0xf
 	cbz	x9, 1f
-	orr	x10, x10, #TCR_HA		// hardware Access flag update
+	orr	tcr, tcr, #TCR_HA		// hardware Access flag update
 1:
 #endif	/* CONFIG_ARM64_HW_AFDBM */
-	msr	tcr_el1, x10
+	msr	mair_el1, mair
+	msr	tcr_el1, tcr
 	/*
 	 * Prepare SCTLR
 	 */
 	mov_q	x0, INIT_SCTLR_EL1_MMU_ON
 	ret					// return to head.S
+
+	.unreq	mair
+	.unreq	tcr
 SYM_FUNC_END(__cpu_setup)

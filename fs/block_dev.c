@@ -79,7 +79,7 @@ static void kill_bdev(struct block_device *bdev)
 {
 	struct address_space *mapping = bdev->bd_inode->i_mapping;
 
-	if (mapping->nrpages == 0 && mapping->nrexceptional == 0)
+	if (mapping_empty(mapping))
 		return;
 
 	invalidate_bh_lrus();
@@ -118,19 +118,35 @@ int truncate_bdev_range(struct block_device *bdev, fmode_t mode,
 	if (!(mode & FMODE_EXCL)) {
 		int err = bd_prepare_to_claim(bdev, truncate_bdev_range);
 		if (err)
-			return err;
+			goto invalidate;
 	}
 
 	truncate_inode_pages_range(bdev->bd_inode->i_mapping, lstart, lend);
 	if (!(mode & FMODE_EXCL))
 		bd_abort_claiming(bdev, truncate_bdev_range);
 	return 0;
+
+invalidate:
+	/*
+	 * Someone else has handle exclusively open. Try invalidating instead.
+	 * The 'end' argument is inclusive so the rounding is safe.
+	 */
+	return invalidate_inode_pages2_range(bdev->bd_inode->i_mapping,
+					     lstart >> PAGE_SHIFT,
+					     lend >> PAGE_SHIFT);
 }
-EXPORT_SYMBOL(truncate_bdev_range);
 
 static void set_init_blocksize(struct block_device *bdev)
 {
-	bdev->bd_inode->i_blkbits = blksize_bits(bdev_logical_block_size(bdev));
+	unsigned int bsize = bdev_logical_block_size(bdev);
+	loff_t size = i_size_read(bdev->bd_inode);
+
+	while (bsize < PAGE_SIZE) {
+		if (size & bsize)
+			break;
+		bsize <<= 1;
+	}
+	bdev->bd_inode->i_blkbits = blksize_bits(bsize);
 }
 
 int set_blocksize(struct block_device *bdev, int size)
@@ -214,7 +230,7 @@ static void blkdev_bio_end_io_simple(struct bio *bio)
 
 static ssize_t
 __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
-		int nr_pages)
+		unsigned int nr_pages)
 {
 	struct file *file = iocb->ki_filp;
 	struct block_device *bdev = I_BDEV(bdev_file_inode(file));
@@ -259,6 +275,8 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 		bio.bi_opf = dio_bio_write_op(iocb);
 		task_io_account_write(ret);
 	}
+	if (iocb->ki_flags & IOCB_NOWAIT)
+		bio.bi_opf |= REQ_NOWAIT;
 	if (iocb->ki_flags & IOCB_HIPRI)
 		bio_set_polled(&bio, iocb);
 
@@ -348,8 +366,8 @@ static void blkdev_bio_end_io(struct bio *bio)
 	}
 }
 
-static ssize_t
-__blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
+static ssize_t __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter,
+		unsigned int nr_pages)
 {
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = bdev_file_inode(file);
@@ -412,11 +430,13 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 			bio->bi_opf = dio_bio_write_op(iocb);
 			task_io_account_write(bio->bi_iter.bi_size);
 		}
+		if (iocb->ki_flags & IOCB_NOWAIT)
+			bio->bi_opf |= REQ_NOWAIT;
 
 		dio->size += bio->bi_iter.bi_size;
 		pos += bio->bi_iter.bi_size;
 
-		nr_pages = iov_iter_npages(iter, BIO_MAX_PAGES);
+		nr_pages = bio_iov_vecs_to_alloc(iter, BIO_MAX_VECS);
 		if (!nr_pages) {
 			bool polled = false;
 
@@ -479,15 +499,16 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 static ssize_t
 blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 {
-	int nr_pages;
+	unsigned int nr_pages;
 
-	nr_pages = iov_iter_npages(iter, BIO_MAX_PAGES + 1);
-	if (!nr_pages)
+	if (!iov_iter_count(iter))
 		return 0;
-	if (is_sync_kiocb(iocb) && nr_pages <= BIO_MAX_PAGES)
+
+	nr_pages = bio_iov_vecs_to_alloc(iter, BIO_MAX_VECS + 1);
+	if (is_sync_kiocb(iocb) && nr_pages <= BIO_MAX_VECS)
 		return __blkdev_direct_IO_simple(iocb, iter, nr_pages);
 
-	return __blkdev_direct_IO(iocb, iter, min(nr_pages, BIO_MAX_PAGES));
+	return __blkdev_direct_IO(iocb, iter, bio_max_segs(nr_pages));
 }
 
 static __init int blkdev_init(void)
@@ -605,6 +626,8 @@ int thaw_bdev(struct block_device *bdev)
 		error = thaw_super(sb);
 	if (error)
 		bdev->bd_fsfreeze_count++;
+	else
+		bdev->bd_fsfreeze_sb = NULL;
 out:
 	mutex_unlock(&bdev->bd_fsfreeze_mutex);
 	return error;
@@ -678,7 +701,7 @@ int blkdev_fsync(struct file *filp, loff_t start, loff_t end, int datasync)
 	 * i_mutex and doing so causes performance issues with concurrent
 	 * O_SYNC writers to a block device.
 	 */
-	error = blkdev_issue_flush(bdev, GFP_KERNEL);
+	error = blkdev_issue_flush(bdev);
 	if (error == -EOPNOTSUPP)
 		error = 0;
 
@@ -774,8 +797,11 @@ static struct kmem_cache * bdev_cachep __read_mostly;
 static struct inode *bdev_alloc_inode(struct super_block *sb)
 {
 	struct bdev_inode *ei = kmem_cache_alloc(bdev_cachep, GFP_KERNEL);
+
 	if (!ei)
 		return NULL;
+	memset(&ei->bdev, 0, sizeof(ei->bdev));
+	ei->bdev.bd_bdi = &noop_backing_dev_info;
 	return &ei->vfs_inode;
 }
 
@@ -869,14 +895,12 @@ struct block_device *bdev_alloc(struct gendisk *disk, u8 partno)
 	mapping_set_gfp_mask(&inode->i_data, GFP_USER);
 
 	bdev = I_BDEV(inode);
-	memset(bdev, 0, sizeof(*bdev));
 	mutex_init(&bdev->bd_mutex);
 	mutex_init(&bdev->bd_fsfreeze_mutex);
 	spin_lock_init(&bdev->bd_size_lock);
 	bdev->bd_disk = disk;
 	bdev->bd_partno = partno;
 	bdev->bd_inode = inode;
-	bdev->bd_bdi = &noop_backing_dev_info;
 #ifdef CONFIG_SYSFS
 	INIT_LIST_HEAD(&bdev->bd_holder_disks);
 #endif
@@ -1055,7 +1079,6 @@ static void bd_finish_claiming(struct block_device *bdev, void *holder)
 /**
  * bd_abort_claiming - abort claiming of a block device
  * @bdev: block device of interest
- * @whole: whole block device
  * @holder: holder that has claimed @bdev
  *
  * Abort claiming of a block device when the exclusive open failed. This can be
@@ -1217,16 +1240,18 @@ static void __blkdev_put(struct block_device *bdev, fmode_t mode, int for_part);
 int bdev_disk_changed(struct block_device *bdev, bool invalidate)
 {
 	struct gendisk *disk = bdev->bd_disk;
-	int ret;
+	int ret = 0;
 
 	lockdep_assert_held(&bdev->bd_mutex);
 
-	clear_bit(GD_NEED_PART_SCAN, &bdev->bd_disk->state);
-
 rescan:
-	ret = blk_drop_partitions(bdev);
-	if (ret)
-		return ret;
+	if (bdev->bd_part_count)
+		return -EBUSY;
+	sync_blockdev(bdev);
+	invalidate_bdev(bdev);
+	blk_drop_partitions(disk);
+
+	clear_bit(GD_NEED_PART_SCAN, &disk->state);
 
 	/*
 	 * Historically we only set the capacity to zero for devices that
@@ -1240,9 +1265,6 @@ rescan:
 		if (disk_part_scan_enabled(disk) ||
 		    !(disk->flags & GENHD_FL_REMOVABLE))
 			set_capacity(disk, 0);
-	} else {
-		if (disk->fops->revalidate_disk)
-			disk->fops->revalidate_disk(disk);
 	}
 
 	if (get_capacity(disk)) {
@@ -1260,7 +1282,7 @@ rescan:
 	return ret;
 }
 /*
- * Only exported for for loop and dasd for historic reasons.  Don't use in new
+ * Only exported for loop and dasd for historic reasons.  Don't use in new
  * code!
  */
 EXPORT_SYMBOL_GPL(bdev_disk_changed);
@@ -1414,10 +1436,6 @@ struct block_device *blkdev_get_by_dev(dev_t dev, fmode_t mode, void *holder)
 	if (ret)
 		return ERR_PTR(ret);
 
-	/*
-	 * If we lost a race with 'disk' being deleted, try again.  See md.c.
-	 */
-retry:
 	bdev = blkdev_get_no_open(dev);
 	if (!bdev)
 		return ERR_PTR(-ENXIO);
@@ -1464,8 +1482,6 @@ abort_claiming:
 	disk_unblock_events(disk);
 put_blkdev:
 	blkdev_put_no_open(bdev);
-	if (ret == -ERESTARTSYS)
-		goto retry;
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL(blkdev_get_by_dev);
@@ -1661,6 +1677,7 @@ ssize_t blkdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	struct inode *bd_inode = bdev_file_inode(file);
 	loff_t size = i_size_read(bd_inode);
 	struct blk_plug plug;
+	size_t shorted = 0;
 	ssize_t ret;
 
 	if (bdev_read_only(I_BDEV(bd_inode)))
@@ -1678,12 +1695,17 @@ ssize_t blkdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if ((iocb->ki_flags & (IOCB_NOWAIT | IOCB_DIRECT)) == IOCB_NOWAIT)
 		return -EOPNOTSUPP;
 
-	iov_iter_truncate(from, size - iocb->ki_pos);
+	size -= iocb->ki_pos;
+	if (iov_iter_count(from) > size) {
+		shorted = iov_iter_count(from) - size;
+		iov_iter_truncate(from, size);
+	}
 
 	blk_start_plug(&plug);
 	ret = __generic_file_write_iter(iocb, from);
 	if (ret > 0)
 		ret = generic_write_sync(iocb, ret);
+	iov_iter_reexpand(from, iov_iter_count(from) + shorted);
 	blk_finish_plug(&plug);
 	return ret;
 }
@@ -1695,13 +1717,21 @@ ssize_t blkdev_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	struct inode *bd_inode = bdev_file_inode(file);
 	loff_t size = i_size_read(bd_inode);
 	loff_t pos = iocb->ki_pos;
+	size_t shorted = 0;
+	ssize_t ret;
 
 	if (pos >= size)
 		return 0;
 
 	size -= pos;
-	iov_iter_truncate(to, size);
-	return generic_file_read_iter(iocb, to);
+	if (iov_iter_count(to) > size) {
+		shorted = iov_iter_count(to) - size;
+		iov_iter_truncate(to, size);
+	}
+
+	ret = generic_file_read_iter(iocb, to);
+	iov_iter_reexpand(to, iov_iter_count(to) + shorted);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(blkdev_read_iter);
 
@@ -1798,13 +1828,11 @@ static long blkdev_fallocate(struct file *file, int mode, loff_t start,
 		return error;
 
 	/*
-	 * Invalidate again; if someone wandered in and dirtied a page,
-	 * the caller will be given -EBUSY.  The third argument is
-	 * inclusive, so the rounding here is safe.
+	 * Invalidate the page cache again; if someone wandered in and dirtied
+	 * a page, we just discard it - userspace has no way of knowing whether
+	 * the write happened before or after discard completing...
 	 */
-	return invalidate_inode_pages2_range(bdev->bd_inode->i_mapping,
-					     start >> PAGE_SHIFT,
-					     end >> PAGE_SHIFT);
+	return truncate_bdev_range(bdev, file->f_mode, start, end);
 }
 
 const struct file_operations def_blk_fops = {
@@ -1828,6 +1856,7 @@ const struct file_operations def_blk_fops = {
 /**
  * lookup_bdev  - lookup a struct block_device by name
  * @pathname:	special file representing the block device
+ * @dev:	return value of the block device's dev_t
  *
  * Get a reference to the blockdevice at @pathname in the current
  * namespace if possible and return it.  Return ERR_PTR(error)

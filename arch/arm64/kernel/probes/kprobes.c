@@ -264,13 +264,14 @@ int __kprobes kprobe_fault_handler(struct pt_regs *regs, unsigned int fsr)
 		 * normal page fault.
 		 */
 		instruction_pointer_set(regs, (unsigned long) cur->addr);
-		if (!instruction_pointer(regs))
-			BUG();
+		BUG_ON(!instruction_pointer(regs));
 
-		if (kcb->kprobe_status == KPROBE_REENTER)
+		if (kcb->kprobe_status == KPROBE_REENTER) {
 			restore_previous_kprobe(kcb);
-		else
+		} else {
+			kprobes_restore_local_irqflag(kcb, regs);
 			reset_current_kprobe();
+		}
 
 		break;
 	case KPROBE_HIT_ACTIVE:
@@ -352,8 +353,8 @@ kprobe_breakpoint_ss_handler(struct pt_regs *regs, unsigned int esr)
 	unsigned long addr = instruction_pointer(regs);
 	struct kprobe *cur = kprobe_running();
 
-	if (cur && (kcb->kprobe_status == KPROBE_HIT_SS)
-	    && ((unsigned long)&cur->ainsn.api.insn[1] == addr)) {
+	if (cur && (kcb->kprobe_status & (KPROBE_HIT_SS | KPROBE_REENTER)) &&
+	    ((unsigned long)&cur->ainsn.api.insn[1] == addr)) {
 		kprobes_restore_local_irqflag(kcb, regs);
 		post_kprobe_handler(cur, kcb, regs);
 

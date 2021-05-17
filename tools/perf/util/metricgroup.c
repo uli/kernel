@@ -162,6 +162,14 @@ static bool contains_event(struct evsel **metric_events, int num_events,
 	return false;
 }
 
+static bool evsel_same_pmu(struct evsel *ev1, struct evsel *ev2)
+{
+	if (!ev1->pmu_name || !ev2->pmu_name)
+		return false;
+
+	return !strcmp(ev1->pmu_name, ev2->pmu_name);
+}
+
 /**
  * Find a group of events in perf_evlist that correspond to those from a parsed
  * metric expression. Note, as find_evsel_group is called in the same order as
@@ -173,7 +181,7 @@ static bool contains_event(struct evsel **metric_events, int num_events,
  * @pctx: the parse context for the metric expression.
  * @metric_no_merge: don't attempt to share events for the metric with other
  * metrics.
- * @has_constraint: is there a contraint on the group of events? In which case
+ * @has_constraint: is there a constraint on the group of events? In which case
  * the events won't be grouped.
  * @metric_events: out argument, null terminated array of evsel's associated
  * with the metric.
@@ -280,8 +288,7 @@ static struct evsel *find_evsel_group(struct evlist *perf_evlist,
 			 */
 			if (!has_constraint &&
 			    ev->leader != metric_events[i]->leader &&
-			    !strcmp(ev->leader->pmu_name,
-				    metric_events[i]->leader->pmu_name))
+			    evsel_same_pmu(ev->leader, metric_events[i]->leader))
 				break;
 			if (!strcmp(metric_events[i]->name, ev->name)) {
 				set_bit(ev->idx, evlist_used);
@@ -372,7 +379,7 @@ static int metricgroup__setup_events(struct list_head *groups,
 				metric_refs[i].metric_expr = ref->metric_expr;
 				i++;
 			}
-		};
+		}
 
 		expr->metric_refs = metric_refs;
 		expr->metric_expr = m->metric_expr;
@@ -611,7 +618,7 @@ static int metricgroup__print_sys_event_iter(struct pmu_event *pe, void *data)
 void metricgroup__print(bool metrics, bool metricgroups, char *filter,
 			bool raw, bool details)
 {
-	struct pmu_events_map *map = perf_pmu__find_map(NULL);
+	struct pmu_events_map *map = pmu_events_map__find();
 	struct pmu_event *pe;
 	int i;
 	struct rblist groups;
@@ -766,7 +773,6 @@ int __weak arch_get_runtimeparam(struct pmu_event *pe __maybe_unused)
 struct metricgroup_add_iter_data {
 	struct list_head *metric_list;
 	const char *metric;
-	struct metric **m;
 	struct expr_ids *ids;
 	int *ret;
 	bool *has_match;
@@ -894,7 +900,8 @@ static int __add_metric(struct list_head *metric_list,
 		    (match_metric(__pe->metric_group, __metric) ||	\
 		     match_metric(__pe->metric_name, __metric)))
 
-static struct pmu_event *find_metric(const char *metric, struct pmu_events_map *map)
+struct pmu_event *metricgroup__find_metric(const char *metric,
+					   struct pmu_events_map *map)
 {
 	struct pmu_event *pe;
 	int i;
@@ -979,7 +986,7 @@ static int __resolve_metric(struct metric *m,
 			struct expr_id *parent;
 			struct pmu_event *pe;
 
-			pe = find_metric(cur->key, map);
+			pe = metricgroup__find_metric(cur->key, map);
 			if (!pe)
 				continue;
 
@@ -1058,12 +1065,13 @@ static int metricgroup__add_metric_sys_event_iter(struct pmu_event *pe,
 						  void *data)
 {
 	struct metricgroup_add_iter_data *d = data;
+	struct metric *m = NULL;
 	int ret;
 
 	if (!match_pe_metric(pe, d->metric))
 		return 0;
 
-	ret = add_metric(d->metric_list, pe, d->metric_no_group, d->m, NULL, d->ids);
+	ret = add_metric(d->metric_list, pe, d->metric_no_group, &m, NULL, d->ids);
 	if (ret)
 		return ret;
 
@@ -1114,7 +1122,6 @@ static int metricgroup__add_metric(const char *metric, bool metric_no_group,
 				.metric_list = &list,
 				.metric = metric,
 				.metric_no_group = metric_no_group,
-				.m = &m,
 				.ids = &ids,
 				.has_match = &has_match,
 				.ret = &ret,
@@ -1247,8 +1254,7 @@ int metricgroup__parse_groups(const struct option *opt,
 			      struct rblist *metric_events)
 {
 	struct evlist *perf_evlist = *(struct evlist **)opt->value;
-	struct pmu_events_map *map = perf_pmu__find_map(NULL);
-
+	struct pmu_events_map *map = pmu_events_map__find();
 
 	return parse_groups(perf_evlist, str, metric_no_group,
 			    metric_no_merge, NULL, metric_events, map);
@@ -1267,7 +1273,7 @@ int metricgroup__parse_groups_test(struct evlist *evlist,
 
 bool metricgroup__has_metric(const char *metric)
 {
-	struct pmu_events_map *map = perf_pmu__find_map(NULL);
+	struct pmu_events_map *map = pmu_events_map__find();
 	struct pmu_event *pe;
 	int i;
 

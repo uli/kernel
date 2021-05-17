@@ -15,6 +15,36 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/slab.h>
 
+/* Typical regulator startup times as per data sheet in uS */
+#define BD71847_BUCK1_STARTUP_TIME 144
+#define BD71847_BUCK2_STARTUP_TIME 162
+#define BD71847_BUCK3_STARTUP_TIME 162
+#define BD71847_BUCK4_STARTUP_TIME 240
+#define BD71847_BUCK5_STARTUP_TIME 270
+#define BD71847_BUCK6_STARTUP_TIME 200
+#define BD71847_LDO1_STARTUP_TIME  440
+#define BD71847_LDO2_STARTUP_TIME  370
+#define BD71847_LDO3_STARTUP_TIME  310
+#define BD71847_LDO4_STARTUP_TIME  400
+#define BD71847_LDO5_STARTUP_TIME  530
+#define BD71847_LDO6_STARTUP_TIME  400
+
+#define BD71837_BUCK1_STARTUP_TIME 160
+#define BD71837_BUCK2_STARTUP_TIME 180
+#define BD71837_BUCK3_STARTUP_TIME 180
+#define BD71837_BUCK4_STARTUP_TIME 180
+#define BD71837_BUCK5_STARTUP_TIME 160
+#define BD71837_BUCK6_STARTUP_TIME 240
+#define BD71837_BUCK7_STARTUP_TIME 220
+#define BD71837_BUCK8_STARTUP_TIME 200
+#define BD71837_LDO1_STARTUP_TIME  440
+#define BD71837_LDO2_STARTUP_TIME  370
+#define BD71837_LDO3_STARTUP_TIME  310
+#define BD71837_LDO4_STARTUP_TIME  400
+#define BD71837_LDO5_STARTUP_TIME  310
+#define BD71837_LDO6_STARTUP_TIME  400
+#define BD71837_LDO7_STARTUP_TIME  530
+
 /*
  * BD718(37/47/50) have two "enable control modes". ON/OFF can either be
  * controlled by software - or by PMIC internal HW state machine. Whether
@@ -56,37 +86,7 @@ static const struct regulator_ops BD718XX_HWOPNAME(name) = {	\
  * 10: 2.50mV/usec	10mV 4uS
  * 11: 1.25mV/usec	10mV 8uS
  */
-static int bd718xx_buck1234_set_ramp_delay(struct regulator_dev *rdev,
-					   int ramp_delay)
-{
-	int id = rdev_get_id(rdev);
-	unsigned int ramp_value;
-
-	dev_dbg(&rdev->dev, "Buck[%d] Set Ramp = %d\n", id + 1,
-		ramp_delay);
-	switch (ramp_delay) {
-	case 1 ... 1250:
-		ramp_value = BUCK_RAMPRATE_1P25MV;
-		break;
-	case 1251 ... 2500:
-		ramp_value = BUCK_RAMPRATE_2P50MV;
-		break;
-	case 2501 ... 5000:
-		ramp_value = BUCK_RAMPRATE_5P00MV;
-		break;
-	case 5001 ... 10000:
-		ramp_value = BUCK_RAMPRATE_10P00MV;
-		break;
-	default:
-		ramp_value = BUCK_RAMPRATE_10P00MV;
-		dev_err(&rdev->dev,
-			"%s: ramp_delay: %d not supported, setting 10000mV//us\n",
-			rdev->desc->name, ramp_delay);
-	}
-
-	return regmap_update_bits(rdev->regmap, BD718XX_REG_BUCK1_CTRL + id,
-				  BUCK_RAMPRATE_MASK, ramp_value << 6);
-}
+static const unsigned int bd718xx_ramp_delay[] = { 10000, 5000, 2500, 1250 };
 
 /* These functions are used when regulators are under HW state machine control.
  * We assume PMIC is in RUN state because SW running and able to query the
@@ -348,7 +348,7 @@ static const struct regulator_ops bd71837_buck34_ops_hwctrl = {
 	.set_voltage_sel = regulator_set_voltage_sel_regmap,
 	.get_voltage_sel = regulator_get_voltage_sel_regmap,
 	.set_voltage_time_sel = regulator_set_voltage_time_sel,
-	.set_ramp_delay = bd718xx_buck1234_set_ramp_delay,
+	.set_ramp_delay = regulator_set_ramp_delay_regmap,
 };
 
 /*
@@ -357,7 +357,7 @@ static const struct regulator_ops bd71837_buck34_ops_hwctrl = {
 BD718XX_OPS(bd718xx_dvs_buck_regulator_ops, regulator_list_voltage_linear_range,
 	    NULL, regulator_set_voltage_sel_regmap,
 	    regulator_get_voltage_sel_regmap, regulator_set_voltage_time_sel,
-	    bd718xx_buck1234_set_ramp_delay);
+	    /* bd718xx_buck1234_set_ramp_delay */ regulator_set_ramp_delay_regmap);
 
 /*
  * BD71837 BUCK1/2/3/4
@@ -613,7 +613,12 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.vsel_mask = DVS_BUCK_RUN_MASK,
 			.enable_reg = BD718XX_REG_BUCK1_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71847_BUCK1_STARTUP_TIME,
 			.owner = THIS_MODULE,
+			.ramp_delay_table = bd718xx_ramp_delay,
+			.n_ramp_values = ARRAY_SIZE(bd718xx_ramp_delay),
+			.ramp_reg = BD718XX_REG_BUCK1_CTRL,
+			.ramp_mask = BUCK_RAMPRATE_MASK,
 			.of_parse_cb = buck_set_hw_dvs_levels,
 		},
 		.dvs = {
@@ -646,6 +651,11 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.vsel_mask = DVS_BUCK_RUN_MASK,
 			.enable_reg = BD718XX_REG_BUCK2_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71847_BUCK2_STARTUP_TIME,
+			.ramp_delay_table = bd718xx_ramp_delay,
+			.n_ramp_values = ARRAY_SIZE(bd718xx_ramp_delay),
+			.ramp_reg = BD718XX_REG_BUCK2_CTRL,
+			.ramp_mask = BUCK_RAMPRATE_MASK,
 			.owner = THIS_MODULE,
 			.of_parse_cb = buck_set_hw_dvs_levels,
 		},
@@ -680,6 +690,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.linear_range_selectors = bd71847_buck3_volt_range_sel,
 			.enable_reg = BD718XX_REG_1ST_NODVS_BUCK_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71847_BUCK3_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -706,6 +717,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.vsel_range_mask = BD71847_BUCK4_RANGE_MASK,
 			.linear_range_selectors = bd71847_buck4_volt_range_sel,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71847_BUCK4_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -727,6 +739,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.vsel_mask = BD718XX_3RD_NODVS_BUCK_MASK,
 			.enable_reg = BD718XX_REG_3RD_NODVS_BUCK_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71847_BUCK5_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -750,6 +763,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.vsel_mask = BD718XX_4TH_NODVS_BUCK_MASK,
 			.enable_reg = BD718XX_REG_4TH_NODVS_BUCK_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71847_BUCK6_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -775,6 +789,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.linear_range_selectors = bd718xx_ldo1_volt_range_sel,
 			.enable_reg = BD718XX_REG_LDO1_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71847_LDO1_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -796,6 +811,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.n_voltages = ARRAY_SIZE(ldo_2_volts),
 			.enable_reg = BD718XX_REG_LDO2_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71847_LDO2_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -818,6 +834,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.vsel_mask = BD718XX_LDO3_MASK,
 			.enable_reg = BD718XX_REG_LDO3_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71847_LDO3_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -840,6 +857,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.vsel_mask = BD718XX_LDO4_MASK,
 			.enable_reg = BD718XX_REG_LDO4_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71847_LDO4_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -865,6 +883,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.linear_range_selectors = bd71847_ldo5_volt_range_sel,
 			.enable_reg = BD718XX_REG_LDO5_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71847_LDO5_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -889,6 +908,7 @@ static struct bd718xx_regulator_data bd71847_regulators[] = {
 			.vsel_mask = BD718XX_LDO6_MASK,
 			.enable_reg = BD718XX_REG_LDO6_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71847_LDO6_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -942,6 +962,11 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = DVS_BUCK_RUN_MASK,
 			.enable_reg = BD718XX_REG_BUCK1_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71837_BUCK1_STARTUP_TIME,
+			.ramp_delay_table = bd718xx_ramp_delay,
+			.n_ramp_values = ARRAY_SIZE(bd718xx_ramp_delay),
+			.ramp_reg = BD718XX_REG_BUCK1_CTRL,
+			.ramp_mask = BUCK_RAMPRATE_MASK,
 			.owner = THIS_MODULE,
 			.of_parse_cb = buck_set_hw_dvs_levels,
 		},
@@ -975,6 +1000,11 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = DVS_BUCK_RUN_MASK,
 			.enable_reg = BD718XX_REG_BUCK2_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71837_BUCK2_STARTUP_TIME,
+			.ramp_delay_table = bd718xx_ramp_delay,
+			.n_ramp_values = ARRAY_SIZE(bd718xx_ramp_delay),
+			.ramp_reg = BD718XX_REG_BUCK2_CTRL,
+			.ramp_mask = BUCK_RAMPRATE_MASK,
 			.owner = THIS_MODULE,
 			.of_parse_cb = buck_set_hw_dvs_levels,
 		},
@@ -1005,6 +1035,11 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = DVS_BUCK_RUN_MASK,
 			.enable_reg = BD71837_REG_BUCK3_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71837_BUCK3_STARTUP_TIME,
+			.ramp_delay_table = bd718xx_ramp_delay,
+			.n_ramp_values = ARRAY_SIZE(bd718xx_ramp_delay),
+			.ramp_reg = BD71837_REG_BUCK3_CTRL,
+			.ramp_mask = BUCK_RAMPRATE_MASK,
 			.owner = THIS_MODULE,
 			.of_parse_cb = buck_set_hw_dvs_levels,
 		},
@@ -1033,6 +1068,11 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = DVS_BUCK_RUN_MASK,
 			.enable_reg = BD71837_REG_BUCK4_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71837_BUCK4_STARTUP_TIME,
+			.ramp_delay_table = bd718xx_ramp_delay,
+			.n_ramp_values = ARRAY_SIZE(bd718xx_ramp_delay),
+			.ramp_reg = BD71837_REG_BUCK4_CTRL,
+			.ramp_mask = BUCK_RAMPRATE_MASK,
 			.owner = THIS_MODULE,
 			.of_parse_cb = buck_set_hw_dvs_levels,
 		},
@@ -1065,6 +1105,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.linear_range_selectors = bd71837_buck5_volt_range_sel,
 			.enable_reg = BD718XX_REG_1ST_NODVS_BUCK_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71837_BUCK5_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1088,6 +1129,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = BD71837_BUCK6_MASK,
 			.enable_reg = BD718XX_REG_2ND_NODVS_BUCK_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71837_BUCK6_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1109,6 +1151,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = BD718XX_3RD_NODVS_BUCK_MASK,
 			.enable_reg = BD718XX_REG_3RD_NODVS_BUCK_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71837_BUCK7_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1132,6 +1175,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = BD718XX_4TH_NODVS_BUCK_MASK,
 			.enable_reg = BD718XX_REG_4TH_NODVS_BUCK_CTRL,
 			.enable_mask = BD718XX_BUCK_EN,
+			.enable_time = BD71837_BUCK8_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1157,6 +1201,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.linear_range_selectors = bd718xx_ldo1_volt_range_sel,
 			.enable_reg = BD718XX_REG_LDO1_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71837_LDO1_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1178,6 +1223,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.n_voltages = ARRAY_SIZE(ldo_2_volts),
 			.enable_reg = BD718XX_REG_LDO2_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71837_LDO2_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1200,6 +1246,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = BD718XX_LDO3_MASK,
 			.enable_reg = BD718XX_REG_LDO3_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71837_LDO3_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1222,6 +1269,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = BD718XX_LDO4_MASK,
 			.enable_reg = BD718XX_REG_LDO4_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71837_LDO4_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1246,6 +1294,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = BD71837_LDO5_MASK,
 			.enable_reg = BD718XX_REG_LDO5_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71837_LDO5_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1272,6 +1321,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = BD718XX_LDO6_MASK,
 			.enable_reg = BD718XX_REG_LDO6_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71837_LDO6_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1296,6 +1346,7 @@ static struct bd718xx_regulator_data bd71837_regulators[] = {
 			.vsel_mask = BD71837_LDO7_MASK,
 			.enable_reg = BD71837_REG_LDO7_VOLT,
 			.enable_mask = BD718XX_LDO_EN,
+			.enable_time = BD71837_LDO7_STARTUP_TIME,
 			.owner = THIS_MODULE,
 		},
 		.init = {
@@ -1497,7 +1548,7 @@ err_out:
 
 static int bd718xx_probe(struct platform_device *pdev)
 {
-	struct bd718xx *mfd;
+	struct regmap *regmap;
 	struct regulator_config config = { 0 };
 	int i, j, err, omit_enable;
 	bool use_snvs;
@@ -1506,11 +1557,10 @@ static int bd718xx_probe(struct platform_device *pdev)
 	enum rohm_chip_type chip = platform_get_device_id(pdev)->driver_data;
 	const struct regulator_ops **swops, **hwops;
 
-	mfd = dev_get_drvdata(pdev->dev.parent);
-	if (!mfd) {
+	regmap = dev_get_regmap(pdev->dev.parent, NULL);
+	if (!regmap) {
 		dev_err(&pdev->dev, "No MFD driver data\n");
-		err = -EINVAL;
-		goto err;
+		return -EINVAL;
 	}
 
 	switch (chip) {
@@ -1533,7 +1583,7 @@ static int bd718xx_probe(struct platform_device *pdev)
 	}
 
 	/* Register LOCK release */
-	err = regmap_update_bits(mfd->chip.regmap, BD718XX_REG_REGLOCK,
+	err = regmap_update_bits(regmap, BD718XX_REG_REGLOCK,
 				 (REGLOCK_PWRSEQ | REGLOCK_VREG), 0);
 	if (err) {
 		dev_err(&pdev->dev, "Failed to unlock PMIC (%d)\n", err);
@@ -1552,8 +1602,7 @@ static int bd718xx_probe(struct platform_device *pdev)
 	 * bit allowing HW defaults for power rails to be used
 	 */
 	if (!use_snvs) {
-		err = regmap_update_bits(mfd->chip.regmap,
-					 BD718XX_REG_TRANS_COND1,
+		err = regmap_update_bits(regmap, BD718XX_REG_TRANS_COND1,
 					 BD718XX_ON_REQ_POWEROFF_MASK |
 					 BD718XX_SWRESET_POWEROFF_MASK |
 					 BD718XX_WDOG_POWEROFF_MASK |
@@ -1569,7 +1618,7 @@ static int bd718xx_probe(struct platform_device *pdev)
 	}
 
 	config.dev = pdev->dev.parent;
-	config.regmap = mfd->chip.regmap;
+	config.regmap = regmap;
 	/*
 	 * There are cases when we want to leave the enable-control for
 	 * the HW state machine and use this driver only for voltage control.
@@ -1628,7 +1677,7 @@ static int bd718xx_probe(struct platform_device *pdev)
 		if (!no_enable_control && (!use_snvs ||
 		    !rdev->constraints->always_on ||
 		    !rdev->constraints->boot_on)) {
-			err = regmap_update_bits(mfd->chip.regmap, r->init.reg,
+			err = regmap_update_bits(regmap, r->init.reg,
 						 r->init.mask, r->init.val);
 			if (err) {
 				dev_err(&pdev->dev,
@@ -1638,7 +1687,7 @@ static int bd718xx_probe(struct platform_device *pdev)
 			}
 		}
 		for (j = 0; j < r->additional_init_amnt; j++) {
-			err = regmap_update_bits(mfd->chip.regmap,
+			err = regmap_update_bits(regmap,
 						 r->additional_inits[j].reg,
 						 r->additional_inits[j].mask,
 						 r->additional_inits[j].val);

@@ -568,7 +568,6 @@ struct nfsd4_copy {
 	struct nfs_fh		c_fh;
 	nfs4_stateid		stateid;
 };
-extern bool inter_copy_offload_enable;
 
 struct nfsd4_seek {
 	/* request */
@@ -699,7 +698,7 @@ struct nfsd4_compoundargs {
 
 struct nfsd4_compoundres {
 	/* scratch variables for XDR encode */
-	struct xdr_stream		xdr;
+	struct xdr_stream		*xdr;
 	struct svc_rqst *		rqstp;
 
 	u32				taglen;
@@ -867,9 +866,3 @@ struct nfsd4_operation {
 
 
 #endif
-
-/*
- * Local variables:
- *  c-basic-offset: 8
- * End:
- */

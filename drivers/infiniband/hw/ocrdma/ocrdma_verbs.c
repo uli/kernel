@@ -54,7 +54,7 @@
 #include "ocrdma_verbs.h"
 #include <rdma/ocrdma-abi.h>
 
-int ocrdma_query_pkey(struct ib_device *ibdev, u8 port, u16 index, u16 *pkey)
+int ocrdma_query_pkey(struct ib_device *ibdev, u32 port, u16 index, u16 *pkey)
 {
 	if (index > 0)
 		return -EINVAL;
@@ -150,7 +150,7 @@ static inline void get_link_speed_and_width(struct ocrdma_dev *dev,
 }
 
 int ocrdma_query_port(struct ib_device *ibdev,
-		      u8 port, struct ib_port_attr *props)
+		      u32 port, struct ib_port_attr *props)
 {
 	enum ib_port_state port_state;
 	struct ocrdma_dev *dev;
@@ -434,9 +434,9 @@ static void ocrdma_dealloc_ucontext_pd(struct ocrdma_ucontext *uctx)
 		pr_err("%s(%d) Freeing in use pdid=0x%x.\n",
 		       __func__, dev->id, pd->id);
 	}
-	kfree(uctx->cntxt_pd);
 	uctx->cntxt_pd = NULL;
 	_ocrdma_dealloc_pd(dev, pd);
+	kfree(pd);
 }
 
 static struct ocrdma_pd *ocrdma_get_ucontext_pd(struct ocrdma_ucontext *uctx)

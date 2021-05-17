@@ -296,7 +296,12 @@ static int __uac_clock_find_source(struct snd_usb_audio *chip,
 
 	selector = snd_usb_find_clock_selector(chip->ctrl_intf, entity_id);
 	if (selector) {
-		int ret, i, cur;
+		int ret, i, cur, err;
+
+		if (selector->bNrInPins == 1) {
+			ret = 1;
+			goto find_source;
+		}
 
 		/* the entity ID we are looking for is a selector.
 		 * find out what it currently selects */
@@ -314,17 +319,22 @@ static int __uac_clock_find_source(struct snd_usb_audio *chip,
 			return -EINVAL;
 		}
 
+	find_source:
 		cur = ret;
 		ret = __uac_clock_find_source(chip, fmt,
 					      selector->baCSourceID[ret - 1],
 					      visited, validate);
+		if (ret > 0) {
+			err = uac_clock_selector_set_val(chip, entity_id, cur);
+			if (err < 0)
+				return err;
+		}
+
 		if (!validate || ret > 0 || !chip->autoclock)
 			return ret;
 
 		/* The current clock source is invalid, try others. */
 		for (i = 1; i <= selector->bNrInPins; i++) {
-			int err;
-
 			if (i == cur)
 				continue;
 
@@ -390,7 +400,7 @@ static int __uac3_clock_find_source(struct snd_usb_audio *chip,
 
 	selector = snd_usb_find_clock_selector_v3(chip->ctrl_intf, entity_id);
 	if (selector) {
-		int ret, i, cur;
+		int ret, i, cur, err;
 
 		/* the entity ID we are looking for is a selector.
 		 * find out what it currently selects */
@@ -412,6 +422,12 @@ static int __uac3_clock_find_source(struct snd_usb_audio *chip,
 		ret = __uac3_clock_find_source(chip, fmt,
 					       selector->baCSourceID[ret - 1],
 					       visited, validate);
+		if (ret > 0) {
+			err = uac_clock_selector_set_val(chip, entity_id, cur);
+			if (err < 0)
+				return err;
+		}
+
 		if (!validate || ret > 0 || !chip->autoclock)
 			return ret;
 
@@ -485,17 +501,8 @@ static int set_sample_rate_v1(struct snd_usb_audio *chip,
 			      const struct audioformat *fmt, int rate)
 {
 	struct usb_device *dev = chip->dev;
-	struct usb_host_interface *alts;
-	unsigned int ep;
 	unsigned char data[3];
 	int err, crate;
-
-	alts = snd_usb_get_host_interface(chip, fmt->iface, fmt->altsetting);
-	if (!alts)
-		return -EINVAL;
-	if (get_iface_desc(alts)->bNumEndpoints < 1)
-		return -EINVAL;
-	ep = get_endpoint(alts, 0)->bEndpointAddress;
 
 	/* if endpoint doesn't have sampling rate control, bail out */
 	if (!(fmt->attributes & UAC_EP_CS_ATTR_SAMPLE_RATE))
@@ -506,11 +513,11 @@ static int set_sample_rate_v1(struct snd_usb_audio *chip,
 	data[2] = rate >> 16;
 	err = snd_usb_ctl_msg(dev, usb_sndctrlpipe(dev, 0), UAC_SET_CUR,
 			      USB_TYPE_CLASS | USB_RECIP_ENDPOINT | USB_DIR_OUT,
-			      UAC_EP_CS_ATTR_SAMPLE_RATE << 8, ep,
-			      data, sizeof(data));
+			      UAC_EP_CS_ATTR_SAMPLE_RATE << 8,
+			      fmt->endpoint, data, sizeof(data));
 	if (err < 0) {
 		dev_err(&dev->dev, "%d:%d: cannot set freq %d to ep %#x\n",
-			fmt->iface, fmt->altsetting, rate, ep);
+			fmt->iface, fmt->altsetting, rate, fmt->endpoint);
 		return err;
 	}
 
@@ -524,11 +531,11 @@ static int set_sample_rate_v1(struct snd_usb_audio *chip,
 
 	err = snd_usb_ctl_msg(dev, usb_rcvctrlpipe(dev, 0), UAC_GET_CUR,
 			      USB_TYPE_CLASS | USB_RECIP_ENDPOINT | USB_DIR_IN,
-			      UAC_EP_CS_ATTR_SAMPLE_RATE << 8, ep,
-			      data, sizeof(data));
+			      UAC_EP_CS_ATTR_SAMPLE_RATE << 8,
+			      fmt->endpoint, data, sizeof(data));
 	if (err < 0) {
 		dev_err(&dev->dev, "%d:%d: cannot get freq at ep %#x\n",
-			fmt->iface, fmt->altsetting, ep);
+			fmt->iface, fmt->altsetting, fmt->endpoint);
 		chip->sample_rate_read_error++;
 		return 0; /* some devices don't support reading */
 	}
@@ -655,10 +662,10 @@ static int set_sample_rate_v2v3(struct snd_usb_audio *chip,
 		cur_rate = prev_rate;
 
 	if (cur_rate != rate) {
-		usb_audio_warn(chip,
-			       "%d:%d: freq mismatch (RO clock): req %d, clock runs @%d\n",
-			       fmt->iface, fmt->altsetting, rate, cur_rate);
-		return -ENXIO;
+		usb_audio_dbg(chip,
+			      "%d:%d: freq mismatch: req %d, clock runs @%d\n",
+			      fmt->iface, fmt->altsetting, rate, cur_rate);
+		/* continue processing */
 	}
 
 validation:
