@@ -132,12 +132,20 @@ allOf:
       properties:
         clocks:
           minItems: 1
-          maxItems: 2
+          maxItems: 3
         clock-names:
-          minItems: 1
-          items:
+          oneOf:
             - const: core
-            - const: cd
+            - items:
+                - const: core
+                - const: cd
+            - items:
+                - const: core
+                - const: clkh
+            - items:
+                - const: core
+                - const: clkh
+                - const: cd
 
   - if:
       properties:
