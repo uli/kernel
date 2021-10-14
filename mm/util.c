@@ -593,6 +593,10 @@ void *kvmalloc_node(size_t size, gfp_t flags, int node)
 	if (ret || size <= PAGE_SIZE)
 		return ret;
 
+	/* Don't even allow crazy sizes */
+	if (WARN_ON_ONCE(size > INT_MAX))
+		return NULL;
+
 	return __vmalloc_node(size, 1, flags, node,
 			__builtin_return_address(0));
 }
@@ -634,6 +638,21 @@ void kvfree_sensitive(const void *addr, size_t len)
 	}
 }
 EXPORT_SYMBOL(kvfree_sensitive);
+
+void *kvrealloc(const void *p, size_t oldsize, size_t newsize, gfp_t flags)
+{
+	void *newp;
+
+	if (oldsize >= newsize)
+		return (void *)p;
+	newp = kvmalloc(newsize, flags);
+	if (!newp)
+		return NULL;
+	memcpy(newp, p, oldsize);
+	kvfree(p);
+	return newp;
+}
+EXPORT_SYMBOL(kvrealloc);
 
 static inline void *__page_rmapping(struct page *page)
 {
@@ -731,6 +750,16 @@ int __page_mapcount(struct page *page)
 }
 EXPORT_SYMBOL_GPL(__page_mapcount);
 
+void copy_huge_page(struct page *dst, struct page *src)
+{
+	unsigned i, nr = compound_nr(src);
+
+	for (i = 0; i < nr; i++) {
+		cond_resched();
+		copy_highpage(nth_page(dst, i), nth_page(src, i));
+	}
+}
+
 int sysctl_overcommit_memory __read_mostly = OVERCOMMIT_GUESS;
 int sysctl_overcommit_ratio __read_mostly = 50;
 unsigned long sysctl_overcommit_kbytes __read_mostly;
@@ -758,7 +787,7 @@ int overcommit_policy_handler(struct ctl_table *table, int write, void *buffer,
 		size_t *lenp, loff_t *ppos)
 {
 	struct ctl_table t;
-	int new_policy;
+	int new_policy = -1;
 	int ret;
 
 	/*
@@ -776,7 +805,7 @@ int overcommit_policy_handler(struct ctl_table *table, int write, void *buffer,
 		t = *table;
 		t.data = &new_policy;
 		ret = proc_dointvec_minmax(&t, write, buffer, lenp, ppos);
-		if (ret)
+		if (ret || new_policy == -1)
 			return ret;
 
 		mm_compute_batch(new_policy);
