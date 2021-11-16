@@ -169,18 +169,13 @@ struct hal_data_8188e {
 	u16	BasicRateSet;
 
 	/* rf_ctrl */
-	u8	rf_chip;
 	u8	rf_type;
 
 	u8	BoardType;
 
 	/*  EEPROM setting. */
-	u16	EEPROMVID;
-	u16	EEPROMPID;
 	u16	EEPROMSVID;
 	u16	EEPROMSDID;
-	u8	EEPROMCustomerID;
-	u8	EEPROMSubCustomerID;
 	u8	EEPROMVersion;
 	u8	EEPROMRegulatory;
 
@@ -329,8 +324,6 @@ void Hal_ReadTxPowerInfo88E(struct adapter *padapter, u8 *hwinfo,
 void Hal_EfuseParseEEPROMVer88E(struct adapter *padapter, u8 *hwinfo,
 				bool AutoLoadFail);
 void rtl8188e_EfuseParseChnlPlan(struct adapter *padapter, u8 *hwinfo,
-				 bool AutoLoadFail);
-void Hal_EfuseParseCustomerID88E(struct adapter *padapter, u8 *hwinfo,
 				 bool AutoLoadFail);
 void Hal_ReadAntennaDiversity88E(struct adapter *pAdapter,u8 *PROMContent,
 				 bool AutoLoadFail);

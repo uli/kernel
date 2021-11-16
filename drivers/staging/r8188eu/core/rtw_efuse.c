@@ -40,10 +40,7 @@ static bool Efuse_Read1ByteFromFakeContent(u16 Offset, u8 *Value)
 }
 
 static bool
-Efuse_Write1ByteToFakeContent(
-			struct adapter *pAdapter,
-			u16 Offset,
-			u8 Value)
+Efuse_Write1ByteToFakeContent(u16 Offset, u8 Value)
 {
 	if (Offset >= EFUSE_MAX_HW_SIZE)
 		return false;
@@ -162,7 +159,7 @@ u8 efuse_OneByteWrite(struct adapter *pAdapter, u16 addr, u8 data, bool pseudo)
 	u8 result;
 
 	if (pseudo) {
-		result = Efuse_Write1ByteToFakeContent(pAdapter, addr, data);
+		result = Efuse_Write1ByteToFakeContent(addr, data);
 		return result;
 	}
 
@@ -244,13 +241,13 @@ static void Efuse_ReadAllMap(struct adapter *pAdapter, u8 efuseType, u8 *Efuse, 
 {
 	u16 mapLen = 0;
 
-	rtl8188e_EfusePowerSwitch(pAdapter, false, true);
+	rtl8188e_EfusePowerSwitch(pAdapter, true);
 
 	rtl8188e_EFUSE_GetEfuseDefinition(pAdapter, efuseType, TYPE_EFUSE_MAP_LEN, (void *)&mapLen, pseudo);
 
 	rtl8188e_ReadEFuse(pAdapter, efuseType, 0, mapLen, Efuse, pseudo);
 
-	rtl8188e_EfusePowerSwitch(pAdapter, false, false);
+	rtl8188e_EfusePowerSwitch(pAdapter, false);
 }
 
 /*-----------------------------------------------------------------------------
